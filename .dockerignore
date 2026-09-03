@@ -1,0 +1,30 @@
+# What must never reach the build context.
+#
+# The first entry is the important one. An archive holds other players'
+# usernames and share codes and your own Steam authentication ticket, and a
+# build context is copied wholesale to the daemon and can end up in the image.
+# The archive belongs in a mounted volume, never baked in.
+archive/
+run/
+*.jsonl
+
+# Nothing here runs the game or builds it.
+.venv/
+.idea/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+dist-new/
+build/
+*.spec
+launch.py
+analysis/
+design/
+tests/
+tools/
+docs/
+
+# Local pointers and logs.
+.archive_path
+*.log

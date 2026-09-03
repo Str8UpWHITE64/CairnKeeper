@@ -1,0 +1,94 @@
+# Build the release executable in public, from a tagged commit.
+#
+# A hash published by hand only helps somebody who builds it themselves and
+# compares -- and PyInstaller output is not byte-reproducible, so their build
+# will not match this one anyway. What a player actually wants to know is that
+# the binary came from the source they can read. That is what this proves:
+# GitHub builds it, the log is public, and the attestation ties the file to
+# this commit and this workflow.
+#
+# It does not make Windows stop warning about it. Only code signing does that,
+# and an unsigned executable nobody has seen before is still a reasonable thing
+# for a computer to complain about.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write        # create the release
+  id-token: write        # sign the provenance attestation
+  attestations: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The client itself is pure standard library. PyInstaller is only needed
+      # to freeze it, and `build.py --check` fails the job if anything on the
+      # play path has quietly picked up a third-party import.
+      - name: Install the build tool
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Run the tests
+        run: |
+          python -m pip install pytest pytest-randomly
+          python -m pytest tests -q
+
+      - name: Check before building
+        run: python build.py --check
+
+      - name: Build
+        run: python build.py
+
+      - name: Show what was built
+        run: |
+          Get-ChildItem dist
+          Get-Content dist/SHA256.txt
+
+      # Ties the file to this commit and this workflow run, verifiable with
+      # `gh attestation verify CairnKeeper.exe --repo <owner>/<repo>`.
+      - name: Attest where it came from
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/CairnKeeper.exe
+
+      - name: Keep it on the run as well as the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: CairnKeeper
+          path: |
+            dist/CairnKeeper.exe
+            dist/SHA256.txt
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/CairnKeeper.exe
+            dist/SHA256.txt
+          generate_release_notes: true
+          body: |
+            Built by GitHub Actions from ${{ github.sha }}.
+            The build log and the workflow that produced it are public.
+
+            Verify it came from this repository:
+
+            ```
+            gh attestation verify CairnKeeper.exe --repo ${{ github.repository }}
+            ```
+
+            Windows will still warn about an unsigned executable it has not
+            seen before. That is reasonable, and signing is the only thing that
+            changes it.

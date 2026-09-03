@@ -1,0 +1,73 @@
+# Hosting a Phantom Abyss preservation server for other players.
+#
+#   mkdir -p archive
+#   docker compose up -d --build
+#
+# --build matters on every update: `docker compose up` on its own reuses the
+# image it already has, so a changed Dockerfile or changed source is ignored
+# and you debug the previous version.
+#
+# Make the archive directory yourself before the first run. A bind mount whose
+# host directory does not exist is created by Docker, owned by root, and then
+# nothing running as you can write to it.
+#
+# It runs as uid 1000, which on most Linux systems is you. If yours is
+# different, say so once and it will run as you instead:
+#
+#   echo PHANTOM_UID=$(id -u) > .env
+#   echo PHANTOM_GID=$(id -g) >> .env
+#
+# Nothing inside the image has an account -- it is given a plain uid -- so the
+# files written into your archive belong to you and you can read them without
+# sudo. Check yours with `id -u`.
+#
+# Then players put your address into the Join box in their own client. They
+# only need the host name: the port below is the one the client assumes.
+#
+# What you are hosting is the archive in ./archive. Put a contribution folder's
+# contents there, or copy an archive somebody gathered. An empty archive serves
+# nothing, and the server says so at startup.
+#
+# What you will hold about the people who play here: a save per player, filed
+# under a handle their own client minted. No Steam IDs, no auth tickets, no
+# friend lists -- those are swapped out before anything leaves their machine,
+# so this server has never been told them and cannot leak what it does not have.
+
+services:
+  cairnkeeper:
+    build: .
+    image: cairnkeeper:latest
+    container_name: cairnkeeper
+    restart: unless-stopped
+
+    ports:
+      # host:container. Change the left number to move it; players then need
+      # the port in the address they type.
+      - "54908:54908"
+
+    # Who the server runs as -- you, rather than an account invented inside the
+    # image. It writes only into the archive below, and those files should
+    # belong to whoever owns that directory.
+    user: "${PHANTOM_UID:-1000}:${PHANTOM_GID:-1000}"
+
+    volumes:
+      # The archive. Everything the server keeps is in here, so this directory
+      # is the thing to back up -- and the only thing worth backing up.
+      - ./archive:/archive
+
+    environment:
+      # Where the server reads and writes. Matches the mount above.
+      PHANTOM_OFFLINE_STATE: /archive
+
+    # It reads an archive and answers HTTP. It has no reason to be able to do
+    # anything else, so it is not allowed to.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

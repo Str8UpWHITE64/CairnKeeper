@@ -1,0 +1,38 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+
+# Points at wherever the archive lives on this machine.
+.archive_path
+
+# Extracted from the game binary; regenerate with tools/dump_strings.py
+analysis/
+
+# Captures, fixtures, generated certificates and offline save state.
+#
+# NEVER COMMIT THESE. Beyond your own data they contain other players':
+#   fixtures/GetFriends.jsonl, AddFriend.jsonl  -> usernames, share codes,
+#                                                  essence, reputation
+#   fixtures/GetDungeon.jsonl                   -> phantom owners' usernames
+#   session/credentials.json                    -> a live Steam auth ticket
+#
+# phantom_offline/redact.py strips credentials and platform ids at write time,
+# but usernames and share codes are deliberately left intact so the archive
+# stays faithful. Keep the archive out of any public repo.
+run/
+
+# Build output. The executable is rebuilt from source; publishing it belongs in
+# a release, not in the repository.
+dist/
+build/
+launch.py
+*.spec
+
+# Your own uid for the Docker host. .env.example is the shared one.
+.env
+# UI mockups. Useful while designing the window, dead weight in a repository
+# somebody clones to run the thing.
+design/

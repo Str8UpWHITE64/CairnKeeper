@@ -1,0 +1,39 @@
+# The test suite, run in public on every push.
+#
+# Most of these tests exist because something was wrong and somebody noticed,
+# so a green run is a statement about the bugs that are known to stay fixed --
+# which is worth more to somebody deciding whether to trust this than a claim
+# in a README.
+
+name: Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is where players run it. Linux is where a server runs, and
+        # is also the one without a display -- the window tests skip there,
+        # which is worth exercising rather than assuming.
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the test runner
+        run: python -m pip install --upgrade pip pytest pytest-randomly
+
+      - name: Run the tests
+        run: python -m pytest tests -q
