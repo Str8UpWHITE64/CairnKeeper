@@ -30,21 +30,21 @@ HAS_DISPLAY = _has_display()
 
 
 @pytest.fixture(autouse=True)
-def _never_dial_out(monkeypatch):
-    """The window asks the live service how it is. The tests must not.
+def _no_background_work(monkeypatch):
+    """Opening the window looks for the game and reads the archive.
 
-    Opening the window starts that check on a background thread, so on a
-    machine with the game installed every window test made a real request to
-    wiby.net and left the thread running past the end of the test. One of them
-    was still waiting on the socket when the interpreter shut down, and took
-    the whole run with it.
+    Both go on threads nothing joins, so they outlive the test that made
+    them: eleven windows in one run leaves dozens still walking the disk,
+    and the look also asks the live service how it is, which was a real
+    request to wiby.net from every window test on a machine with the game
+    installed. The pile of them crashed a Windows runner during teardown.
+
+    These tests are about the window. Both scans have tests of their own.
     """
-    from phantom_offline import reachability
+    from phantom_offline.gui import App
 
-    monkeypatch.setattr(
-        reachability, "check",
-        lambda *a, **k: reachability.Reachability(reachability.UNREACHABLE),
-    )
+    monkeypatch.setattr(App, "_look_for_game", lambda self: None)
+    monkeypatch.setattr(App, "_count_archive", lambda self: None)
 
 
 def _open(tmp_path: Path):
