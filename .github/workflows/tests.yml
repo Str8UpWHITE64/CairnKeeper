@@ -31,8 +31,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # cryptography is the `proxy` extra in pyproject: the TLS fallback for an
+      # unpatched game, and the only thing here that is not standard library.
+      # The play path never imports it -- `build.py --check` is what holds that
+      # line -- but the certificate store has tests, and they need it present.
       - name: Install the test runner
-        run: python -m pip install --upgrade pip pytest pytest-randomly
+        run: python -m pip install --upgrade pip pytest pytest-randomly cryptography
 
       - name: Run the tests
         run: python -m pytest tests -q

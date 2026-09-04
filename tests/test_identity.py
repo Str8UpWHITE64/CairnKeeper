@@ -227,3 +227,21 @@ def test_a_profile_chosen_elsewhere_is_picked_up(tmp_path: Path) -> None:
     assert serving.handle_for(ME) == fresh, "the running server followed"
     window.choose_profile(ME, original)
     assert serving.handle_for(ME) == original, "and follows a switch back"
+
+
+def test_an_unreadable_file_does_not_hand_out_a_new_handle(tmp_path: Path) -> None:
+    """The handle is the save. Losing it quietly is the worst failure here.
+
+    Re-reading identity.json on every request is what lets a running server
+    follow a profile switch, and it puts a half-written or briefly locked file
+    in the path of every request. Reading one as empty would mint a fresh
+    handle and file the player's progress under a name no server has seen.
+    """
+    identity = Identity(tmp_path)
+    handle = identity.handle_for(ME)
+
+    identity.path.write_text("{ this is not json", encoding="utf-8")
+    assert identity.handle_for(ME) == handle, "kept what it already had"
+
+    identity.path.write_text("null", encoding="utf-8")
+    assert identity.handle_for(ME) == handle, "and a valid file that says nothing"

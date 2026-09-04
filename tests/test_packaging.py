@@ -161,7 +161,13 @@ def test_a_server_starts_without_the_certificate_toolkit(tmp_path) -> None:
                 state_dir=tmp_path / mode,
                 direct_port=54960, proxy_port=54961, mode=mode,
             )
-            assert direct is not None and proxy is not None
+            try:
+                assert direct is not None and proxy is not None
+            finally:
+                # Both rounds want the same ports. Windows allowed the second
+                # bind anyway and hid this; Linux refused it.
+                direct.server_close()
+                proxy.server_close()
 
 
 def test_certificates_are_still_made_when_something_wants_one(tmp_path) -> None:

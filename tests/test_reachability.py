@@ -26,8 +26,12 @@ LIVE_BODY = json.dumps({
 
 
 class _Response:
+    # close() is not decoration: HTTPError takes this as its file object and
+    # closes it when collected, which without one raised out of __del__ and
+    # left an unraisable-exception warning on an otherwise clean run.
     def __init__(self, body): self._body = body
     def read(self, n=None): return self._body
+    def close(self): return None
     def __enter__(self): return self
     def __exit__(self, *a): return False
 

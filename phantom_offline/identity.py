@@ -63,14 +63,7 @@ class Identity:
     def __init__(self, state_dir: Path):
         self.path = Path(state_dir) / FILE
         self._lock = threading.Lock()
-        self._stamp = self._mtime()
         self.data = self._load()
-
-    def _mtime(self) -> float:
-        try:
-            return self.path.stat().st_mtime
-        except OSError:
-            return 0.0
 
     def _refresh(self) -> None:
         """Pick up a profile chosen elsewhere since this was loaded.
@@ -80,11 +73,26 @@ class Identity:
         one until the whole program was restarted -- which looks exactly like
         the switch being ignored, and is indistinguishable from a bug in the
         switching itself.
+
+        This compared timestamps and only re-read when one moved, which misses
+        a write landing in the same clock tick as the load. Reading the file
+        every time costs about 40us against a few kilobytes, which is nothing
+        beside the request being answered.
+
+        An unreadable file leaves what is already loaded alone. Treating one
+        as empty would mint a new handle and file the player's progress under
+        a name no server has ever seen, which is the single worst thing this
+        module can do.
         """
-        stamp = self._mtime()
-        if stamp != self._stamp:
-            self._stamp = stamp
-            self.data = self._load()
+        if not self.path.exists():
+            return
+        try:
+            stored = json.loads(self.path.read_text("utf-8"))
+        except (OSError, ValueError):
+            return
+        if isinstance(stored, dict):
+            stored.setdefault("players", {})
+            self.data = stored
 
     def handle_for(self, real: str) -> str:
         """The handle this account is currently playing under.
@@ -231,7 +239,6 @@ class Identity:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(self.path)
-        self._stamp = self._mtime()
 
     # ----------------------------------------------------------- the swap
 

@@ -29,20 +29,53 @@ def _has_display() -> bool:
 HAS_DISPLAY = _has_display()
 
 
+@pytest.fixture(autouse=True)
+def _never_dial_out(monkeypatch):
+    """The window asks the live service how it is. The tests must not.
+
+    Opening the window starts that check on a background thread, so on a
+    machine with the game installed every window test made a real request to
+    wiby.net and left the thread running past the end of the test. One of them
+    was still waiting on the socket when the interpreter shut down, and took
+    the whole run with it.
+    """
+    from phantom_offline import reachability
+
+    monkeypatch.setattr(
+        reachability, "check",
+        lambda *a, **k: reachability.Reachability(reachability.UNREACHABLE),
+    )
+
+
+def _open(tmp_path: Path):
+    """The window, retried once if Tk could not read one of its own files.
+
+    Windows loses a Tcl theme file for an instant now and then -- seen here
+    and on a hosted runner, both times a file plainly sitting where the error
+    says it is not. This is not a way around a TclError the program causes:
+    that raises both times and still fails the test.
+    """
+    from phantom_offline.gui import App
+
+    try:
+        return App(tmp_path)
+    except tk.TclError:
+        return App(tmp_path)
+
+
 @pytest.fixture
 def app(tmp_path: Path):
     """A window per test.
 
-    Deliberately not skipping on a TclError raised here: the fixture used to,
-    and a leftover callback from the previous test made the host case -- the
-    one that was actually broken -- skip itself silently while the listen case
-    passed. A skip that hides the failing case is worse than the failure.
+    The skip covers the probe above and nothing else. Building the App is left
+    unguarded on purpose: the fixture used to swallow a TclError from it, and a
+    leftover callback from the previous test made the host case -- the one that
+    was actually broken -- skip itself silently while the listen case passed. A
+    skip that hides the failing case is worse than the failure.
     """
     if not HAS_DISPLAY:
         pytest.skip("no display")
-    from phantom_offline.gui import App
-
-    window = App(tmp_path)
+    window = _open(tmp_path)
     window.root.update()
     yield window
     window.root.destroy()
@@ -119,10 +152,9 @@ def test_a_player_can_report_a_temple_without_a_terminal(tmp_path: Path) -> None
     if not HAS_DISPLAY:
         pytest.skip("no display")
     from phantom_offline.blacklist import Blacklist, archived_id
-    from phantom_offline.gui import App
 
     _served(tmp_path)
-    app = App(tmp_path)
+    app = _open(tmp_path)
     app.root.update()
     try:
         assert app.report_row.winfo_ismapped(), "the offer must be visible"
@@ -148,14 +180,13 @@ def test_a_temple_someone_else_reported_asks_for_agreement(tmp_path: Path) -> No
     if not HAS_DISPLAY:
         pytest.skip("no display")
     from phantom_offline.blacklist import SOURCE_GUEST, Blacklist
-    from phantom_offline.gui import App
 
     _served(tmp_path)
     black = Blacklist(tmp_path / "state" / "blacklist.json")
     black.report_archived(701683, 0, reason="missing-key",
                           player_id="somebody-else", source=SOURCE_GUEST)
 
-    app = App(tmp_path)
+    app = _open(tmp_path)
     app.root.update()
     try:
         line = app.report_line.cget("text")
@@ -170,13 +201,12 @@ def test_a_withheld_temple_says_so(tmp_path: Path) -> None:
     if not HAS_DISPLAY:
         pytest.skip("no display")
     from phantom_offline.blacklist import Blacklist
-    from phantom_offline.gui import App
 
     _served(tmp_path)
     Blacklist(tmp_path / "state" / "blacklist.json").report_archived(
         701683, 0, reason="missing-key", player_id="me")
 
-    app = App(tmp_path)
+    app = _open(tmp_path)
     app.root.update()
     try:
         assert "withheld" in app.report_line.cget("text")
@@ -188,9 +218,7 @@ def test_a_withheld_temple_says_so(tmp_path: Path) -> None:
 def test_nothing_to_report_shows_nothing(tmp_path: Path) -> None:
     if not HAS_DISPLAY:
         pytest.skip("no display")
-    from phantom_offline.gui import App
-
-    app = App(tmp_path)
+    app = _open(tmp_path)
     app.root.update()
     try:
         assert not app.report_row.winfo_ismapped()
