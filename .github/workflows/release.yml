@@ -40,9 +40,12 @@ jobs:
       - name: Install the build tool
         run: python -m pip install --upgrade pip pyinstaller
 
+      # cryptography is the `proxy` extra: the TLS fallback for an unpatched
+      # game, and the only thing the tests need that is not standard library.
+      # `build.py --check` below is what keeps it off the play path.
       - name: Run the tests
         run: |
-          python -m pip install pytest pytest-randomly
+          python -m pip install pytest pytest-randomly cryptography
           python -m pytest tests -q
 
       - name: Check before building
