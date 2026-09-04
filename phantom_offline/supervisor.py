@@ -223,9 +223,24 @@ class Supervisor:
         self._thread.start()
 
     def stop_server(self) -> None:
+        """Stop the loops, wait for them, then give the ports back.
+
+        `shutdown` only asks the loop to stop. Closing without waiting leaves a
+        thread selecting on a handle that is gone, and not closing at all keeps
+        the ports for the life of the process -- which a second session in the
+        same window then cannot have.
+        """
         for srv in self._servers:
             try:
                 srv.shutdown()
+            except Exception:  # noqa: BLE001 - shutting down anyway
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+            self._thread = None
+        for srv in self._servers:
+            try:
+                srv.server_close()
             except Exception:  # noqa: BLE001 - shutting down anyway
                 pass
         self._servers = []

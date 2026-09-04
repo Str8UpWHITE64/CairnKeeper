@@ -174,6 +174,25 @@ def test_the_two_modes_map_onto_the_server(tmp_path: Path) -> None:
     assert MODES[HOST] == "offline"
 
 
+def test_stopping_closes_the_sockets_and_waits_for_the_thread(
+    tmp_path: Path,
+) -> None:
+    """`shutdown` only ends the loop -- it leaves the socket open.
+
+    Stopping used to do just that, so the ports stayed claimed for the life of
+    the process and the serving thread ran on alone. Neither shows while a
+    session only ever happens once, and the window can start a second one.
+    """
+    sup = Supervisor(tmp_path, port=47961, proxy_port=47962)
+    sup.start_server(HOST)
+    listening = list(sup._servers)
+    assert [s.fileno() for s in listening] != [-1, -1], "they are open"
+
+    sup.stop_server()
+    assert [s.fileno() for s in listening] == [-1, -1], "and closed after"
+    assert sup._thread is None, "and nothing is still serving"
+
+
 def test_an_unknown_mode_is_refused(tmp_path: Path) -> None:
     import pytest
 

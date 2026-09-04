@@ -184,7 +184,8 @@ def test_the_report_reaches_the_server_over_http(tmp_path: Path) -> None:
 
     direct, proxy, _ = srv.build(state_dir=root, direct_port=47971,
                                  proxy_port=47972, mode=srv.MODE_OFFLINE)
-    threading.Thread(target=direct.serve_forever, daemon=True).start()
+    thread = threading.Thread(target=direct.serve_forever, daemon=True)
+    thread.start()
     base = "http://127.0.0.1:47971"
     try:
         # Refused before playing, accepted after -- over the wire both times.
@@ -215,6 +216,9 @@ def test_the_report_reaches_the_server_over_http(tmp_path: Path) -> None:
         assert warm["withheld"] is False
         assert warm["needed"] == 1
     finally:
+        # shutdown before close: see the note on _stop in test_join.py.
+        direct.shutdown()
+        thread.join(timeout=10)
         direct.server_close()
         proxy.server_close()
 

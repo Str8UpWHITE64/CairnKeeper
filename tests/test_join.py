@@ -57,6 +57,24 @@ def _content(root: Path) -> None:
                                   "runID": 900, "success": 1})
 
 
+def _serving(server) -> threading.Thread:
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return thread
+
+
+def _stop(server, thread: threading.Thread) -> None:
+    """Ask the loop to stop before closing the socket underneath it.
+
+    Closing a socket a `serve_forever` thread is still selecting on leaves the
+    thread alive on a handle that is gone. Several of those still running at
+    interpreter shutdown segfaulted the suite about one run in ten.
+    """
+    server.shutdown()
+    thread.join(timeout=10)
+    server.server_close()
+
+
 @pytest.fixture
 def joined(tmp_path: Path):
     """A server somebody hosts, and a player's own client pointed at it."""
@@ -65,20 +83,22 @@ def joined(tmp_path: Path):
     host_direct, host_proxy, _ = srv.build(
         state_dir=host_root, direct_port=HOST_PORT, proxy_port=HOST_PROXY,
         mode=srv.MODE_OFFLINE)
-    threading.Thread(target=host_direct.serve_forever, daemon=True).start()
+    host_thread = _serving(host_direct)
 
     player_root = tmp_path / "player"
     (player_root / "assets").mkdir(parents=True)
     joiner, joiner_proxy, _ = srv.build(
         state_dir=player_root, direct_port=JOIN_PORT, proxy_port=JOIN_PROXY,
         mode=srv.MODE_JOIN, remote=f"http://127.0.0.1:{HOST_PORT}")
-    threading.Thread(target=joiner.serve_forever, daemon=True).start()
+    join_thread = _serving(joiner)
 
     try:
         yield host_root, player_root
     finally:
-        for one in (host_direct, host_proxy, joiner, joiner_proxy):
-            one.server_close()
+        _stop(host_direct, host_thread)
+        _stop(joiner, join_thread)
+        host_proxy.server_close()
+        joiner_proxy.server_close()
 
 
 def _post(port: int, path: str, payload: dict) -> dict:
@@ -184,7 +204,7 @@ def test_a_server_that_is_not_there_does_not_hang_the_game(tmp_path: Path) -> No
     joiner, proxy, _ = srv.build(
         state_dir=root, direct_port=47987, proxy_port=47988,
         mode=srv.MODE_JOIN, remote="http://127.0.0.1:9")
-    threading.Thread(target=joiner.serve_forever, daemon=True).start()
+    thread = _serving(joiner)
     try:
         request = urllib.request.Request(
             "http://127.0.0.1:47987/GetDungeon",
@@ -196,7 +216,7 @@ def test_a_server_that_is_not_there_does_not_hang_the_game(tmp_path: Path) -> No
         except urllib.error.HTTPError as exc:
             assert exc.code == 503
     finally:
-        joiner.server_close()
+        _stop(joiner, thread)
         proxy.server_close()
 
 

@@ -102,7 +102,7 @@ build log is public, and each binary carries an attestation tying it to the
 commit that produced it:
 
 ```bash
-gh attestation verify CairnKeeper.exe --repo <owner>/<repo>
+gh attestation verify CairnKeeper.exe --repo Str8UpWHITE64/CairnKeeper
 ```
 
 That is a stronger answer than a published hash. A hash only helps if you build
