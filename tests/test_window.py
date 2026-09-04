@@ -8,6 +8,7 @@ doors, and no Play button, no profile row and no footer beneath them.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -17,13 +18,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 tk = pytest.importorskip("tkinter")
 
 
-def _has_display() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
+def _has_display(tries: int = 3) -> bool:
+    """Whether a plain Tk window opens.
+
+    Asked more than once. A hosted Windows runner intermittently cannot read
+    Tcl's own init.tcl out of the interpreter it is running -- "couldn't read
+    file ...: No error", for a file that is certainly there -- and a single
+    look taken during one of those moments would skip every window test.
+    """
+    for attempt in range(tries):
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            if attempt + 1 < tries:
+                time.sleep(0.5)
+            continue
+        root.destroy()
+        return True
+    return False
 
 
 HAS_DISPLAY = _has_display()
@@ -48,19 +60,38 @@ def _no_background_work(monkeypatch):
 
 
 def _open(tmp_path: Path):
-    """The window, retried once if Tk could not read one of its own files.
+    """The window, with Tk's own start-up retried and nothing else.
 
-    Windows loses a Tcl theme file for an instant now and then -- seen here
-    and on a hosted runner, both times a file plainly sitting where the error
-    says it is not. This is not a way around a TclError the program causes:
-    that raises both times and still fails the test.
+    This machine and a hosted runner both intermittently fail to read Tcl's
+    own library files out of the interpreter they are running -- "couldn't
+    read file .../ttk/classicTheme.tcl: no such file or directory", for a
+    file that is certainly there. It is random per call, so asking whether a
+    plain window opens afterwards proves nothing: it usually does, and the
+    call that just failed was still not our fault.
+
+    What does separate them is where the error comes from. Only the
+    interpreter starting is retried here; a TclError from anything the
+    program does after that is raised untouched and fails the test, which is
+    the case the fixture below exists to keep honest.
     """
     from phantom_offline.gui import App
 
+    real = tk.Tk
+
+    def patient(*args, **kwargs):
+        for attempt in range(4):
+            try:
+                return real(*args, **kwargs)
+            except tk.TclError:
+                if attempt == 3:
+                    raise
+                time.sleep(0.25 * (attempt + 1))
+
+    tk.Tk = patient
     try:
         return App(tmp_path)
-    except tk.TclError:
-        return App(tmp_path)
+    finally:
+        tk.Tk = real
 
 
 @pytest.fixture
