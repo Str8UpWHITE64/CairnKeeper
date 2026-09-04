@@ -75,13 +75,15 @@ class AssetArchiver:
 
         self.fetched = 0
         self.failed = 0
+        self._stopped = False
 
-        self._threads = [
-            threading.Thread(target=self._worker, daemon=True, name=f"asset-{i}")
-            for i in range(workers)
-        ]
-        for t in self._threads:
-            t.start()
+        # Started on the first thing worth downloading, not here. Most of what
+        # builds an archiver never downloads anything -- a share lookup that
+        # comes back empty, a session where the game asks for nothing new --
+        # and four idle threads apiece added up to twenty still alive at the
+        # end of a test run.
+        self._workers = workers
+        self._threads: list[threading.Thread] = []
 
     # ------------------------------------------------------------- index
 
@@ -108,12 +110,46 @@ class AssetArchiver:
                 if url in self._seen:
                     continue
                 self._seen.add(url)
+            self._start()
             self._queue.put(url)
             added += 1
         return added
 
+    def _start(self) -> None:
+        """Bring the workers up, once, and not after stop()."""
+        with self._lock:
+            if self._threads or self._stopped:
+                return
+            self._threads = [
+                threading.Thread(target=self._worker, daemon=True,
+                                 name=f"asset-{i}")
+                for i in range(self._workers)
+            ]
+            for t in self._threads:
+                t.start()
+
     def pending(self) -> int:
         return self._queue.qsize()
+
+    def stop(self) -> None:
+        """Let the workers finish what they have and go.
+
+        These belong to the session, not to the process. Without this a window
+        played twice stacked another four download threads, and a test run
+        that built a handful of servers ended with twenty still alive -- which
+        is the shape of thing that brings an interpreter down on the way out.
+
+        Safe to call twice: the two servers of one session share an archiver
+        and both close.
+        """
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+        for _ in self._threads:
+            self._queue.put(None)
+        for t in self._threads:
+            t.join(timeout=5)
 
     def drain(self, timeout: float | None = None) -> None:
         """Block until queued downloads finish (used by the backfill tool)."""

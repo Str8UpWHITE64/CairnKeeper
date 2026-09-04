@@ -83,3 +83,34 @@ def test_nested_ghost_runs_reached() -> None:
     """Phantom URLs live inside a list of dicts, not at the top level."""
     urls = json.dumps(list(iter_urls({"ghostRuns": REAL_RESPONSE["ghostRuns"]})))
     assert "lttxkd70" in urls and "cmiuchdn" in urls
+
+
+def _asset_threads() -> int:
+    import threading
+
+    return sum(1 for t in threading.enumerate() if t.name.startswith("asset-"))
+
+
+def test_nothing_to_download_starts_no_workers(tmp_path: Path, monkeypatch) -> None:
+    """Most things that build an archiver never download anything.
+
+    A share lookup that comes back empty, a session where the game asks for
+    nothing new. Four idle threads apiece left twenty running at the end of a
+    test run, which is the shape of thing that brings an interpreter down on
+    the way out.
+    """
+    # The workers would otherwise fetch the URLs in REAL_RESPONSE, which are
+    # the real ones, off the real host.
+    monkeypatch.setattr(AssetArchiver, "_fetch", lambda self, url: None)
+
+    before = _asset_threads()
+    archiver = AssetArchiver(tmp_path / "quiet")
+    assert _asset_threads() == before, "built one and started nothing"
+
+    archiver.harvest(REAL_RESPONSE)
+    assert _asset_threads() == before + 4, "and started them when asked to work"
+
+    archiver.stop()
+    assert _asset_threads() == before, "and stopped them"
+    archiver.stop()
+    assert _asset_threads() == before, "twice is fine -- two servers share one"

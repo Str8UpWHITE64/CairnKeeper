@@ -592,6 +592,12 @@ def _make_server(
     class _Server(ThreadingHTTPServer):
         daemon_threads = True
         allow_reuse_address = True
+        archiver = None          # set by build() when this session captures
+
+        def server_close(self):
+            if self.archiver is not None:
+                self.archiver.stop()
+            super().server_close()
 
         def handle_error(self, request, client_address):  # noqa: ANN001
             # Client disconnects are routine and not worth a traceback, but
@@ -640,6 +646,7 @@ def build(
 
     forwarder = None
     session = None
+    archiver = None
     if mode == MODE_JOIN:
         # No archiver: playing on somebody else's server means their content,
         # kept by them. What this machine keeps is its own runs, and those go
@@ -677,6 +684,9 @@ def build(
     # first request or the profile cache hides it until the next restart.
     direct.backend = backend
     proxy.backend = backend
+    # Both carry it and both stop it; stopping twice is a no-op.
+    direct.archiver = archiver
+    proxy.archiver = archiver
     return direct, proxy, recorder
 
 
