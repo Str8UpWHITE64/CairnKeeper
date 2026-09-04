@@ -28,9 +28,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -62,12 +62,12 @@ jobs:
       # Ties the file to this commit and this workflow run, verifiable with
       # `gh attestation verify CairnKeeper.exe --repo <owner>/<repo>`.
       - name: Attest where it came from
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/CairnKeeper.exe
 
       - name: Keep it on the run as well as the release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CairnKeeper
           path: |
@@ -76,7 +76,7 @@ jobs:
 
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/CairnKeeper.exe
