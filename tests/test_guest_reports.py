@@ -182,11 +182,11 @@ def test_the_report_reaches_the_server_over_http(tmp_path: Path) -> None:
         "dungeonFloorType": 1, "dungeonFloorTotalCount": 1,
     }, blob, origin="cdn")
 
-    direct, proxy, _ = srv.build(state_dir=root, direct_port=47971,
-                                 proxy_port=47972, mode=srv.MODE_OFFLINE)
+    direct, proxy, _ = srv.build(state_dir=root, direct_port=0,
+                                 proxy_port=0, mode=srv.MODE_OFFLINE)
+    base = f"http://127.0.0.1:{direct.server_address[1]}"
     thread = threading.Thread(target=direct.serve_forever, daemon=True)
     thread.start()
-    base = "http://127.0.0.1:47971"
     try:
         # Refused before playing, accepted after -- over the wire both times.
         cold = send_report(base, player_id="76561198000000042",

@@ -159,13 +159,14 @@ def test_a_server_starts_without_the_certificate_toolkit(tmp_path) -> None:
         for mode in ("offline", "capture"):
             direct, proxy, _ = server.build(
                 state_dir=tmp_path / mode,
-                direct_port=54960, proxy_port=54961, mode=mode,
+                direct_port=0, proxy_port=0, mode=mode,
             )
             try:
                 assert direct is not None and proxy is not None
             finally:
-                # Both rounds want the same ports. Windows allowed the second
-                # bind anyway and hid this; Linux refused it.
+                # Closed each round. This asked for the same two ports twice
+                # and never gave them back: Windows allowed the second bind
+                # anyway and hid it, Linux refused.
                 direct.server_close()
                 proxy.server_close()
 

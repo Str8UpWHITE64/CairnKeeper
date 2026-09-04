@@ -18,6 +18,7 @@ import sys
 import threading
 import urllib.request
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -35,8 +36,20 @@ RECORDING = base64.b64encode(json.dumps({
     "verificationToken": "SOMEBODY-ELSES-TICKET",
 }).encode()).decode()
 
-HOST_PORT, HOST_PROXY = 47981, 47982
-JOIN_PORT, JOIN_PROXY = 47983, 47984
+class Joined(NamedTuple):
+    """What the fixture below hands a test: two archives and two ports.
+
+    The ports were fixed numbers, which meant the suite could not run beside
+    anything holding them -- including a second copy of itself, which cost
+    three separate false failures before anybody worked out it was that.
+    Asking for port 0 and reading back what the machine gave is the same test
+    and collides with nothing.
+    """
+
+    host_root: Path
+    player_root: Path
+    host_port: int
+    join_port: int
 
 
 def _content(root: Path) -> None:
@@ -81,19 +94,21 @@ def joined(tmp_path: Path):
     host_root = tmp_path / "host"
     _content(host_root)
     host_direct, host_proxy, _ = srv.build(
-        state_dir=host_root, direct_port=HOST_PORT, proxy_port=HOST_PROXY,
+        state_dir=host_root, direct_port=0, proxy_port=0,
         mode=srv.MODE_OFFLINE)
+    host_port = host_direct.server_address[1]
     host_thread = _serving(host_direct)
 
     player_root = tmp_path / "player"
     (player_root / "assets").mkdir(parents=True)
     joiner, joiner_proxy, _ = srv.build(
-        state_dir=player_root, direct_port=JOIN_PORT, proxy_port=JOIN_PROXY,
-        mode=srv.MODE_JOIN, remote=f"http://127.0.0.1:{HOST_PORT}")
+        state_dir=player_root, direct_port=0, proxy_port=0,
+        mode=srv.MODE_JOIN, remote=f"http://127.0.0.1:{host_port}")
+    join_port = joiner.server_address[1]
     join_thread = _serving(joiner)
 
     try:
-        yield host_root, player_root
+        yield Joined(host_root, player_root, host_port, join_port)
     finally:
         _stop(host_direct, host_thread)
         _stop(joiner, join_thread)
@@ -118,7 +133,7 @@ def _play(port: int, player: str, floor: int = 0) -> dict:
 
 
 def test_a_joined_player_gets_the_hosts_temples(joined) -> None:
-    served = _play(JOIN_PORT, "76561198000000042")
+    served = _play(joined.join_port, "76561198000000042")
     assert served["dungeonID"] == 701683
     assert [g["userName"] for g in served["ghostRuns"]] == ["Shrim"]
 
@@ -129,13 +144,13 @@ def test_asset_links_point_at_this_machine(joined) -> None:
     It also means the server does not have to know its own public address,
     which a server in a container generally does not.
     """
-    served = _play(JOIN_PORT, "76561198000000042")
-    assert f"127.0.0.1:{JOIN_PORT}" in served["layoutDownloadURL"]
-    assert f"127.0.0.1:{HOST_PORT}" not in json.dumps(served)
+    served = _play(joined.join_port, "76561198000000042")
+    assert f"127.0.0.1:{joined.join_port}" in served["layoutDownloadURL"]
+    assert f"127.0.0.1:{joined.host_port}" not in json.dumps(served)
 
 
 def test_the_asset_itself_comes_through(joined) -> None:
-    served = _play(JOIN_PORT, "76561198000000042")
+    served = _play(joined.join_port, "76561198000000042")
     with urllib.request.urlopen(served["layoutDownloadURL"], timeout=30) as answer:
         layout = answer.read()
     assert json.loads(base64.b64decode(layout))["roomInfos"]
@@ -148,8 +163,7 @@ def test_the_asset_itself_comes_through(joined) -> None:
 
 def test_the_host_never_learns_the_players_account(joined) -> None:
     """The reason the swap happens here and not on the server."""
-    host_root, _player = joined
-    _post(JOIN_PORT, "/VerifyUserID", {
+    _post(joined.join_port, "/VerifyUserID", {
         "userId": 0, "playerId": "76561198000000042", "platform": "STEAM",
         "currentUsername": "Tomb Raider", "verificationToken": "MY-STEAM-TICKET",
         "platformVerificationId": "0110000123",
@@ -158,7 +172,7 @@ def test_the_host_never_learns_the_players_account(joined) -> None:
     })
 
     everything = ""
-    for path in host_root.rglob("*"):
+    for path in joined.host_root.rglob("*"):
         if path.is_file() and "assets" not in path.parts:
             everything += path.read_text("utf-8", errors="replace")
         if path.is_file():
@@ -171,7 +185,7 @@ def test_the_host_never_learns_the_players_account(joined) -> None:
 
 
 def test_the_game_still_sees_its_own_account(joined) -> None:
-    answer = _post(JOIN_PORT, "/VerifyUserID", {
+    answer = _post(joined.join_port, "/VerifyUserID", {
         "userId": 0, "playerId": "76561198000000042", "platform": "STEAM",
         "currentUsername": "Tomb Raider", "verificationToken": "t",
         "platformVerificationId": "", "clientDungeonVersion": 128,
@@ -181,19 +195,20 @@ def test_the_game_still_sees_its_own_account(joined) -> None:
 
 
 def test_a_run_made_on_the_hosts_server_is_kept_there(joined) -> None:
-    host_root, player_root = joined
-    served = _play(JOIN_PORT, "76561198000000042")
-    _post(JOIN_PORT, "/SubmitRun", {
+    served = _play(joined.join_port, "76561198000000042")
+    _post(joined.join_port, "/SubmitRun", {
         "playerId": "76561198000000042", "dungeonId": served["dungeonID"],
         "dungeonFloorNumber": 0, "gameMode": "DGM_ADVENTURE",
         "success": 0, "lifetime": 42.0, "runData": RECORDING,
     })
 
-    host_library = Library(host_root / "assets", host_root / "fx")
+    host_library = Library(joined.host_root / "assets",
+                           joined.host_root / "fx")
     stored = host_library.temples[(701683, 0)]
     assert len(stored.ghosts) == 2, "theirs, and the one just made"
 
-    mine = Library(player_root / "assets", player_root / "fx")
+    mine = Library(joined.player_root / "assets",
+                   joined.player_root / "fx")
     assert not mine.temples, "the player's own archive stays their own"
 
 
@@ -202,12 +217,13 @@ def test_a_server_that_is_not_there_does_not_hang_the_game(tmp_path: Path) -> No
     root = tmp_path / "player"
     (root / "assets").mkdir(parents=True)
     joiner, proxy, _ = srv.build(
-        state_dir=root, direct_port=47987, proxy_port=47988,
+        state_dir=root, direct_port=0, proxy_port=0,
         mode=srv.MODE_JOIN, remote="http://127.0.0.1:9")
+    port = joiner.server_address[1]
     thread = _serving(joiner)
     try:
         request = urllib.request.Request(
-            "http://127.0.0.1:47987/GetDungeon",
+            f"http://127.0.0.1:{port}/GetDungeon",
             data=json.dumps({"playerId": "x", "dungeonId": 0}).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         try:
@@ -231,8 +247,8 @@ def test_the_server_can_listen_beyond_this_machine(tmp_path: Path) -> None:
     """
     root = tmp_path / "host"
     (root / "assets").mkdir(parents=True)
-    wide, proxy, _ = srv.build(state_dir=root, direct_port=47991,
-                               proxy_port=47992, mode=srv.MODE_OFFLINE,
+    wide, proxy, _ = srv.build(state_dir=root, direct_port=0,
+                               proxy_port=0, mode=srv.MODE_OFFLINE,
                                host="0.0.0.0")
     try:
         assert wide.server_address[0] == "0.0.0.0"
@@ -240,8 +256,8 @@ def test_the_server_can_listen_beyond_this_machine(tmp_path: Path) -> None:
         wide.server_close()
         proxy.server_close()
 
-    narrow, proxy2, _ = srv.build(state_dir=root, direct_port=47993,
-                                  proxy_port=47994, mode=srv.MODE_OFFLINE)
+    narrow, proxy2, _ = srv.build(state_dir=root, direct_port=0,
+                                  proxy_port=0, mode=srv.MODE_OFFLINE)
     try:
         assert narrow.server_address[0] == "127.0.0.1", "the safe default"
     finally:
