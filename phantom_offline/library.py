@@ -155,6 +155,16 @@ def _stand_in_id(asset_name: str) -> int:
     return 900_000_000 + (int.from_bytes(digest[:6], "big") % 90_000_000) * 2
 
 
+# What the server names a layout the client built for itself, when we had no
+# archived one to hand over. See `submit_layout` in backend.py.
+GENERATED_LAYOUT_SUFFIX = "-layout-generated"
+
+
+def is_generated_layout(name: "str | None") -> bool:
+    """Whether this layout was built by a client rather than served by the CDN."""
+    return bool(name) and str(name).endswith(GENERATED_LAYOUT_SUFFIX)
+
+
 class Library:
     """Indexes the archived blobs by (dungeon id, floor)."""
 
@@ -720,6 +730,21 @@ class Library:
             except (KeyError, TypeError, ValueError):
                 continue
             temple = self.temples.get((dungeon_id, floor)) or Temple(dungeon_id, floor)
+
+            # A layout the client generated must never displace one the CDN
+            # served. Every phantom on this floor was recorded running through
+            # the archived building; hand the client a different building and
+            # all of them walk through its walls -- which is what happened, on
+            # floors 0 and 1 of a temple whose floor 2 still had the real one.
+            #
+            # The layout and the response go together or not at all. The
+            # response carries the seed and the floor types that belong to that
+            # building, and taking one from each source is how the two came
+            # apart in the first place.
+            if is_generated_layout(entry.get("layout")) and (
+                    temple.layout and not is_generated_layout(temple.layout)):
+                continue
+
             temple.response = entry.get("response")
             # Records written before provenance existed are assumed synthetic.
             # Being wrong in that direction withholds a real temple from the
