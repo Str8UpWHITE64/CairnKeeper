@@ -368,3 +368,20 @@ def test_a_login_answers_with_the_fields_the_real_one_did(tmp_path) -> None:
                      "platform", "lockedRoutes", "playerStatistics",
                      "serverVersion", "serverProtocolVersion"):
         assert invented not in answer, f"the real server never sent {invented}"
+
+
+def test_a_login_names_the_player_as_their_own_sharer(tmp_path) -> None:
+    """The real server put the player's own id here in all 23 logins.
+
+    It was blanked, for a good reason applied to the wrong case: a captured
+    login carries whoever was captured, and that must not be handed to
+    somebody else. Their own id is not somebody else's. An empty one left the
+    client with no sharer code, and asking the game instance for one froze it.
+    """
+    backend = OfflineBackend(tmp_path / "state")
+    answer = backend.verify_user({
+        "playerId": "76561198000000042", "currentUsername": "Tomb Raider",
+        "platform": "STEAM", "userId": 0,
+    })
+    assert answer["sharerID"] == "76561198000000042"
+    assert answer["sharerID"], "never empty; the client has nothing to show"

@@ -271,9 +271,15 @@ class Identity:
     def unmask(self, result: Any, real: str) -> Any:
         """Put the player's own id back, so the game sees what it sent.
 
-        Only the handle is swapped back, and only into fields that carried a
-        platform id to begin with. The game's own numbering -- `userID` and
-        `runID` -- is left alone: those are the server's, not Steam's.
+        Anywhere the handle appears, whatever the field is called. It used to
+        swap only a named list of fields, which missed `sharerID` -- the login
+        the real server sends puts the player's own id there, and the game was
+        getting either nothing or, once that was filled in, our handle.
+
+        Matching on the value rather than the name is also safer than the list
+        was. Another player's sharer code is not this handle, so it passes
+        through untouched; the game's own numbering -- `userID`, `runID` -- is
+        numeric and never matches either.
         """
         if not real:
             return result
@@ -281,14 +287,15 @@ class Identity:
         if isinstance(result, dict):
             out = {}
             for key, value in result.items():
-                if (str(key).lower() in OWN_IDENTITY
-                        and isinstance(value, str) and value == handle):
+                if isinstance(value, str) and handle and value == handle:
                     out[key] = real
                 else:
                     out[key] = self.unmask(value, real)
             return out
         if isinstance(result, list):
             return [self.unmask(v, real) for v in result]
+        if isinstance(result, str) and handle and result == handle:
+            return real
         return result
 
     # ------------------------------------------------------------ moving in

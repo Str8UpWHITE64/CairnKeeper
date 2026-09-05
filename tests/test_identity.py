@@ -245,3 +245,33 @@ def test_an_unreadable_file_does_not_hand_out_a_new_handle(tmp_path: Path) -> No
 
     identity.path.write_text("null", encoding="utf-8")
     assert identity.handle_for(ME) == handle, "and a valid file that says nothing"
+
+
+def test_the_handle_is_swapped_back_wherever_it_appears(tmp_path: Path) -> None:
+    """Not just in fields somebody thought to list.
+
+    The login the real server sends names the player as their own sharer, and
+    ours left that empty -- the client ended up with no sharer code at all,
+    and asking the game instance for one froze it. Filling it in then shipped
+    the handle to the game instead, because the swap back only covered a named
+    list of fields and sharerID was not on it.
+    """
+    identity = Identity(tmp_path)
+    handle = identity.handle_for(ME)
+
+    reply = identity.unmask({
+        "sharerID": handle,
+        "playerId": handle,
+        "nested": {"whatever": handle},
+        "listed": [handle, "somebody-else"],
+        "userID": 404886,
+        "someoneElsesCode": "not-our-handle",
+    }, ME)
+
+    assert reply["sharerID"] == ME, "the field nobody had listed"
+    assert reply["playerId"] == ME
+    assert reply["nested"]["whatever"] == ME
+    assert reply["listed"] == [ME, "somebody-else"]
+    assert reply["userID"] == 404886, "the server's own numbering is not ours"
+    assert reply["someoneElsesCode"] == "not-our-handle", "and not everyone's"
+    assert handle not in json.dumps(reply), "nothing of ours goes out"

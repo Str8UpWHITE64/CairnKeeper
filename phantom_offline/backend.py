@@ -474,8 +474,12 @@ class OfflineBackend:
             out["targetEndpoint"] = None
             # Captured logins carry the identity of whoever was captured, and
             # a redacted placeholder where the archive removed it. Neither
-            # belongs in somebody else's login.
-            out["sharerID"] = ""
+            # belongs in somebody else's login -- but blanking it was wrong
+            # too. The real server put the player's own id here in all 23
+            # captured logins, and an empty one leaves the client with no
+            # sharer code at all: the save keeps m_sharerID empty, and asking
+            # the game instance for it froze the game outright.
+            out["sharerID"] = player_id or ""
             out["platformVerificationID"] = req.get("platformVerificationId") or ""
             out["verificationToken"] = "offline"
             # The captured daily dungeon expired long ago.
@@ -486,27 +490,22 @@ class OfflineBackend:
                 out["lastRouteInfo"] = self._route_info()
             return self._as_login(out)
 
-        daily = self._daily_info(0)
-        return self._as_login({
+        # Nothing captured to answer from, so the whole thing is assembled.
+        # All nineteen fields, not the eight this used to manage: the client
+        # reads the reply into a struct, and half a struct is not something it
+        # was ever sent.
+        out = dict(profile.snapshot())
+        out.update({
             "currentUsername": name,
-            "userID": self.state["userID"],
-            "userId": self.state["userID"],
-            # Echo the caller. This used to read a server-wide field that no
-            # longer exists -- it held whoever signed in last, which was wrong
-            # on a shared server and was removed -- so every client was told
-            # its own id was empty.
-            "playerId": player_id or "",
-            "platform": req.get("platform", "STEAM"),
-            "platformVerificationID": self.state["userID"],
-            "verificationToken": "offline",
+            "userID": profile.user_id(player_id),
+            "sharerID": player_id or "",
+            "platformVerificationID": req.get("platformVerificationId") or "",
+            "targetEndpoint": None,
             "lastRouteInfo": self._route_info(),
-            "victoryRoutes": [],
-            "lockedRoutes": [],
-            "permanentPurchases": self.state["purchases"],
-            "dailyDungeonInfo": daily,
+            "dailyDungeonInfo": self._daily_info(0),
             "dailyDungeonInfoYesterday": self._daily_info(-1),
-            "playerStatistics": self.state["statistics"],
         })
+        return self._as_login(out)
 
     def refresh_verification(self, req: dict[str, Any]) -> dict[str, Any]:
         return self.verify_user(req)
