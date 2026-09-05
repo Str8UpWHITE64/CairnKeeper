@@ -306,3 +306,24 @@ def test_cleanup_still_only_runs_once(tmp_path: Path, monkeypatch) -> None:
     supervisor.cleanup(fake.path)
     supervisor.cleanup(fake.path)
     assert fake.restored == 1, "a second cleanup must not restore again"
+
+
+def test_a_substituted_backend_reaches_the_server(tmp_path: Path) -> None:
+    """Reusing the patch-and-put-back part is the point.
+
+    Anything built on top of this wants the game answered differently without
+    reimplementing the one piece that must not be got wrong: giving the
+    executable back on the way out, on a crash as much as a clean exit.
+    """
+    made = []
+
+    def make(state_dir, library):
+        made.append(state_dir)
+        return sup_mod.server.OfflineBackend(state_dir / "state", archive=library)
+
+    sup = Supervisor(tmp_path, port=0, proxy_port=0, make_backend=make)
+    sup.start_server(HOST)
+    try:
+        assert made == [tmp_path], "asked for exactly one, and given the state dir"
+    finally:
+        sup.stop_server()

@@ -71,7 +71,13 @@ class Supervisor:
         port: int = 54908,
         proxy_port: int = 54909,
         verbose: bool = False,
+        make_backend=None,
     ):
+        # Passed through to server.build(). Something built on top of this one
+        # -- a randomizer, say -- wants to answer the game differently while
+        # still having the patch put back on the way out, which is the part of
+        # this worth reusing rather than reimplementing.
+        self.make_backend = make_backend
         self.state_dir = Path(state_dir)
         self._save_slots = None
         # Set when playing on somebody else's server. The game still talks to
@@ -192,6 +198,7 @@ class Supervisor:
             verbose=self.verbose,
             mode=wire_mode,
             remote=self.remote,
+            make_backend=self.make_backend,
         )
         if wire_mode == server.MODE_JOIN:
             self._say(f"Playing on {self.remote}. Your Steam account stays here.")

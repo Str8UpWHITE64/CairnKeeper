@@ -30,6 +30,9 @@ dist/
 build/
 launch.py
 *.spec
+# Left behind by `pip install -e .`, which is how something built on top of
+# this picks it up as a library.
+*.egg-info/
 
 # Your own uid for the Docker host. .env.example is the shared one.
 .env
