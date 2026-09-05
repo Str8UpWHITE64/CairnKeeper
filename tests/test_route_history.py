@@ -234,3 +234,99 @@ def test_the_route_handed_back_is_not_the_route_kept(tmp_path: Path) -> None:
     for shape in (handed_back, kept):
         assert shape["completedByID"], "somebody finished it"
         assert shape["dungeons"][0]["relicCollectorUserIDs"] not in ([0], None)
+
+
+def test_no_login_ever_carries_a_null_inside_an_array(tmp_path: Path) -> None:
+    """The one that cost two days.
+
+    `relicCollectorNames` went out as `[null]` on any route that collected a
+    relic. The real server sent plain `null` there in all 1,092 dungeon
+    records it was ever captured sending, relic or not -- and a null inside an
+    array of strings is not something the client can read.
+
+    One of them, in one route, lost the whole login. The client reported
+    itself logged in, verified, server responsive, save matching -- and held
+    no user id, no routes, no whips and no collection, while the run counters
+    in its own save ticked up normally. Handed a captured login instead, the
+    same client took the id immediately.
+
+    Written as a sweep rather than a field check because the shape is the
+    problem, not the field.
+    """
+    backend = _backend(tmp_path)
+    backend.submit_run({
+        "playerId": PLAYER, "routeId": 4242, "dungeonId": 701683,
+        "dungeonFloorNumber": 2, "success": 2, "collectedRelicId": "SoldierDart",
+        "currency": {"essence": 9, "dungeonKeys": [5, 0, 0, 0]},
+    })
+    answer = backend.verify_user({"playerId": PLAYER, "userId": 0,
+                                  "currentUsername": "Tomb Raider"})
+
+    found: list[str] = []
+
+    def sweep(value, path=""):
+        if isinstance(value, list):
+            if any(v is None for v in value):
+                found.append(path)
+            for i, v in enumerate(value):
+                sweep(v, f"{path}[{i}]")
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                sweep(v, f"{path}.{k}" if path else k)
+
+    sweep(answer)
+    assert not found, f"a null sits inside an array at {found}"
+    assert answer["victoryRoutes"], "and the route is still there"
+
+
+def test_routes_stored_with_the_old_shape_are_corrected_on_the_way_out(
+    tmp_path: Path,
+) -> None:
+    """Profiles already hold routes written before anyone knew better.
+
+    Corrected as they are spoken rather than by rewriting them: what is stored
+    is a record of a run that happened.
+    """
+    p = Profile(tmp_path / "p.json")
+    p.record_victory({
+        "routeID": 1, "wageredWhipID": "Bamboo",
+        "dungeons": [{"dungeonID": 100, "relicIDs": ["Panda"],
+                      "relicCollectorNames": [None]}],
+    })
+    assert p.snapshot()["victoryRoutes"][0]["dungeons"][0][
+        "relicCollectorNames"] == [None], "stored as it was written"
+
+    from phantom_offline.backend import _as_sent_route
+
+    spoken = _as_sent_route(p.snapshot()["victoryRoutes"][0])
+    assert spoken["dungeons"][0]["relicCollectorNames"] is None
+
+
+def test_the_reply_carries_a_list_and_the_history_carries_null(tmp_path: Path) -> None:
+    """relicCollectorNames, the third field on this struct to be two shapes.
+
+    In a run submission the real server sends a list of names, one per relic:
+    [null] in 56 of 57 captured replies, an actual name in the other. Read back
+    out of victoryRoutes at the next login it is plain null, in all 1,092
+    records.
+
+    Both directions cost something. A null inside an array of strings is not
+    readable, so a list in the login loses the whole reply -- the client keeps
+    no id, no routes, no collection. Null where the reply wants a list loses
+    the run's own answer, which is what grants the relic as the player walks
+    back into the hub.
+    """
+    backend = _backend(tmp_path)
+    answer = backend.submit_run({
+        "playerId": PLAYER, "routeId": 17, "dungeonId": 701296,
+        "dungeonFloorNumber": 2, "success": 2, "collectedRelicId": "MarbleRelic",
+        "currency": {"essence": 0, "dungeonKeys": [1, 0, 0, 0]},
+    })
+
+    handed_back = answer["lastRunRouteInfo"]["dungeons"][0]
+    assert handed_back["relicCollectorNames"] == [None], "a list, one per relic"
+
+    login = backend.verify_user({"playerId": PLAYER, "userId": 0,
+                                 "currentUsername": "Tomb Raider"})
+    kept = login["victoryRoutes"][0]["dungeons"][0]
+    assert kept["relicCollectorNames"] is None, "and null once it is history"

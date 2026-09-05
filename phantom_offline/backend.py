@@ -238,6 +238,30 @@ def stable_seed(*parts: Any) -> int:
     return int.from_bytes(digest[:4], "big", signed=True)
 
 
+def _as_sent_route(route: Any) -> Any:
+    """A banked route in the shape the real server put on the wire.
+
+    Routes already stored carry `relicCollectorNames: [null]`, written before
+    anyone knew better. The real server sent null there in all 1,092 dungeon
+    records it was ever seen to send, and a null inside an array of strings is
+    not something the client can read -- one of them in one route was enough to
+    lose the entire login.
+
+    Corrected on the way out rather than by rewriting what is stored: the
+    stored copy is a record of a run that happened, and this is a statement
+    about how it is spoken.
+    """
+    if not isinstance(route, dict):
+        return route
+    dungeons = route.get("dungeons")
+    if not isinstance(dungeons, list):
+        return route
+    return dict(route, dungeons=[
+        dict(d, relicCollectorNames=None) if isinstance(d, dict) else d
+        for d in dungeons
+    ])
+
+
 class OfflineBackend:
     """Implements the reconstructed wiby.net game service."""
 
@@ -411,6 +435,9 @@ class OfflineBackend:
         answer = {k: out[k] for k in self.LOGIN_FIELDS if k in out}
         if "playerStats" in answer:
             answer["playerStats"] = as_server_stats(answer["playerStats"])
+        for field in ("victoryRoutes", "activeClassicRoutes"):
+            if isinstance(answer.get(field), list):
+                answer[field] = [_as_sent_route(r) for r in answer[field]]
         return answer
 
     def verify_user(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -1561,6 +1588,18 @@ class OfflineBackend:
             "relicIDs": [relic] if relic else None,
             "relicCollectionFlags": 0,
             "relicCollectorUserIDs": [user_id] if relic else None,
+            # A list here, and null once the route is history. The same
+            # measurement was taken from victoryRoutes -- null in all 1,092
+            # records -- and applied to both, which is the third time that
+            # mistake has been made on this struct. In a reply the real server
+            # sends a list of names one per relic: [null] in 56 of 57 captured
+            # run submissions, and an actual name in the other.
+            #
+            # It matters in both directions. A null inside an array of strings
+            # is not readable, so [null] in the login loses the whole reply --
+            # and null where the reply wants a list loses the run's own answer,
+            # which is what grants the relic when the player walks back into
+            # the hub.
             "relicCollectorNames": [None] if relic else None,
             # -1 while the route is being handed back, 2 once it is history.
             # A live capture shows both, which is how they came to be confused.
@@ -1620,7 +1659,8 @@ class OfflineBackend:
         banked = dict(route)
         banked["storedCurrency"] = None
         banked["dungeons"] = [
-            dict(d, routeID=int(route.get("routeID") or 0), attemptedStatus=2)
+            dict(d, routeID=int(route.get("routeID") or 0), attemptedStatus=2,
+                 relicCollectorNames=None)
             for d in (route.get("dungeons") or [])
         ]
         return banked
