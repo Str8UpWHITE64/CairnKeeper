@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phantom-offline"
-version = "1.0.1"
+version = "1.0.2"
 description = "Keeps Phantom Abyss playable after its servers shut down"
 readme = "README.md"
 requires-python = ">=3.11"
