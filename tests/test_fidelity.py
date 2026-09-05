@@ -167,3 +167,37 @@ def test_stats_go_back_in_the_types_the_server_used(tmp_path) -> None:
                                    "FloorTime": 12.5}]
     assert "SomethingInvented" not in out
     assert set(out) == set(STAT_TYPES), "every field it sends, and only those"
+
+
+def test_existing_user_says_whether_this_server_knows_them(tmp_path) -> None:
+    """It reports the server's record, not what the client remembered.
+
+    The captures made it look like it mirrored the request -- 24 logins where
+    a client sending userId 0 got false and one sending an id got true. That
+    correlation is real but incidental: live, a client that had no id was a
+    player the server had never seen either. Offline the two come apart,
+    because a profile can have a history the client's own save does not.
+
+    Answering false to a returning player sends them through the tutorial and
+    throws their routes away. Found by doing exactly that.
+    """
+    from phantom_offline.backend import OfflineBackend
+
+    backend = OfflineBackend(tmp_path / "state")
+    player = "76561198000000042"
+
+    first = backend.verify_user({"playerId": player, "userId": 0,
+                                 "currentUsername": "Tomb Raider"})
+    assert first["existingUser"] is False, "nobody has seen them yet"
+
+    backend.submit_run({
+        "playerId": player, "routeId": 7, "dungeonId": 900,
+        "dungeonFloorNumber": 1, "success": 2,
+        "currency": {"essence": 0, "dungeonKeys": [1, 0, 0, 0]},
+    })
+
+    # Same client, still no id of its own, but now with a history here.
+    again = backend.verify_user({"playerId": player, "userId": 0,
+                                 "currentUsername": "Tomb Raider"})
+    assert again["existingUser"] is True, "this server has met them since"
+    assert again["victoryRoutes"], "and their route is theirs to get back"
