@@ -252,7 +252,7 @@ def stable_seed(*parts: Any) -> int:
     return int.from_bytes(digest[:4], "big", signed=True)
 
 
-def _as_sent_route(route: Any) -> Any:
+def _as_sent_route(route: Any, user_id: Any = None) -> Any:
     """A banked route in the shape the real server put on the wire.
 
     Routes already stored carry `relicCollectorNames: [null]`, written before
@@ -270,10 +270,29 @@ def _as_sent_route(route: Any) -> Any:
     dungeons = route.get("dungeons")
     if not isinstance(dungeons, list):
         return route
-    return dict(route, dungeons=[
-        dict(d, relicCollectorNames=None) if isinstance(d, dict) else d
+
+    # Every route in a profile is that player's own, so the ids in it are
+    # theirs -- and a player's in-game id can move, because it is allocated
+    # here rather than issued to them. A route left naming an id they no
+    # longer have is a route the client does not count as theirs: the relic
+    # and the whip both stay locked while the route itself sits in the login.
+    #
+    # A zero means a relic somebody else collected, and stays zero.
+    def mine(value: Any) -> Any:
+        return user_id if user_id and value else value
+
+    out = dict(route, dungeons=[
+        dict(d,
+             relicCollectorNames=None,
+             relicCollectorUserIDs=[mine(v) for v in d["relicCollectorUserIDs"]]
+             if isinstance(d.get("relicCollectorUserIDs"), list)
+             else d.get("relicCollectorUserIDs"))
+        if isinstance(d, dict) else d
         for d in dungeons
     ])
+    if user_id and out.get("completedByID"):
+        out["completedByID"] = user_id
+    return out
 
 
 class OfflineBackend:
@@ -449,9 +468,10 @@ class OfflineBackend:
         answer = {k: out[k] for k in self.LOGIN_FIELDS if k in out}
         if "playerStats" in answer:
             answer["playerStats"] = as_server_stats(answer["playerStats"])
+        whose = answer.get("userID")
         for field in ("victoryRoutes", "activeClassicRoutes"):
             if isinstance(answer.get(field), list):
-                answer[field] = [_as_sent_route(r) for r in answer[field]]
+                answer[field] = [_as_sent_route(r, whose) for r in answer[field]]
         return answer
 
     def verify_user(self, req: dict[str, Any]) -> dict[str, Any]:

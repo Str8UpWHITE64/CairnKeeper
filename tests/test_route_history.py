@@ -330,3 +330,36 @@ def test_the_reply_carries_a_list_and_the_history_carries_null(tmp_path: Path) -
                                  "currentUsername": "Tomb Raider"})
     kept = login["victoryRoutes"][0]["dungeons"][0]
     assert kept["relicCollectorNames"] is None, "and null once it is history"
+
+
+def test_a_route_names_the_player_it_belongs_to(tmp_path: Path) -> None:
+    """A player's in-game id can move; their history should follow it.
+
+    The id is allocated here rather than issued to them, so it changes when
+    the allocation does. A route left naming an id they no longer have is one
+    the client does not count as theirs -- the login carried both routes and
+    the relic and the whip stayed locked anyway.
+
+    A zero means a relic somebody else collected, and stays zero.
+    """
+    from phantom_offline.backend import _as_sent_route
+
+    route = {
+        "routeID": 14,
+        "completedByID": 841573782,
+        "dungeons": [{
+            "dungeonID": 701683,
+            "relicIDs": ["SoldierDart", "Panda"],
+            "relicCollectorUserIDs": [841573782, 0],
+            "relicCollectorNames": [None],
+        }],
+    }
+    sent = _as_sent_route(route, 820948)
+    assert sent["completedByID"] == 820948
+    assert sent["dungeons"][0]["relicCollectorUserIDs"] == [820948, 0], (
+        "theirs follows them; somebody else's zero stays a zero")
+    assert sent["dungeons"][0]["relicCollectorNames"] is None
+
+    # Nothing is invented when there is no id to speak for.
+    untouched = _as_sent_route(route, None)
+    assert untouched["completedByID"] == 841573782
