@@ -168,7 +168,7 @@ def test_phantom_carries_the_runner_not_the_server(tmp_path: Path) -> None:
     player's profile.
     """
     backend, lib = _backend(tmp_path)
-    alice, bob = "76561198000000001", "76561199000000002"
+    alice, bob = "76561198000000001", "76561198000000002"
     backend.profiles.for_player(alice).data["currentUsername"] = "Alice"
     backend.profiles.for_player(bob).data["currentUsername"] = "Bob"
 

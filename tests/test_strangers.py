@@ -90,7 +90,7 @@ def _sign_in(backend: OfflineBackend, player: str, name: str) -> dict:
 
 def test_a_stranger_does_not_inherit_the_hosts_save(tmp_path: Path) -> None:
     backend = _server(tmp_path)
-    alice = _sign_in(backend, "76561199000000111", "Alice")
+    alice = _sign_in(backend, "76561198000000111", "Alice")
 
     assert alice["currentUsername"] == "Alice"
     assert alice["permanentPurchases"] == []
@@ -104,7 +104,7 @@ def test_a_stranger_does_not_inherit_the_hosts_save(tmp_path: Path) -> None:
 def test_arriving_first_earns_nothing(tmp_path: Path) -> None:
     """The old rule gave the capture to whoever connected first."""
     backend = _server(tmp_path)
-    _sign_in(backend, "76561199000000111", "Alice")
+    _sign_in(backend, "76561198000000111", "Alice")
     host = _sign_in(backend, "76561198000000042", "Tomb Raider")
 
     assert host["reputation"] == 5763, "the host's save is still the host's"
@@ -114,7 +114,7 @@ def test_arriving_first_earns_nothing(tmp_path: Path) -> None:
 
 def test_nothing_of_the_hosts_reaches_a_stranger(tmp_path: Path) -> None:
     backend = _server(tmp_path)
-    everything = json.dumps(_sign_in(backend, "76561199000000222", "Bob"))
+    everything = json.dumps(_sign_in(backend, "76561198000000222", "Bob"))
     for leak in ("Tomb Raider", "62842", "Second Account", "404886",
                  "<redacted>", "<player-id>"):
         assert leak not in everything, leak
@@ -122,8 +122,8 @@ def test_nothing_of_the_hosts_reaches_a_stranger(tmp_path: Path) -> None:
 
 def test_two_strangers_do_not_share_an_account(tmp_path: Path) -> None:
     backend = _server(tmp_path)
-    alice = _sign_in(backend, "76561199000000111", "Alice")
-    bob = _sign_in(backend, "76561199000000222", "Bob")
+    alice = _sign_in(backend, "76561198000000111", "Alice")
+    bob = _sign_in(backend, "76561198000000222", "Bob")
     assert alice["userID"] != bob["userID"]
     assert alice["currentUsername"] != bob["currentUsername"]
 
@@ -131,24 +131,24 @@ def test_two_strangers_do_not_share_an_account(tmp_path: Path) -> None:
 def test_a_stranger_runs_a_real_temple_and_is_kept(tmp_path: Path) -> None:
     """The round trip the server exists for."""
     backend = _server(tmp_path)
-    _sign_in(backend, "76561199000000111", "Alice")
+    _sign_in(backend, "76561198000000111", "Alice")
 
     served = backend.get_dungeon({
-        "playerId": "76561199000000111", "gameMode": "DGM_ADVENTURE",
+        "playerId": "76561198000000111", "gameMode": "DGM_ADVENTURE",
         "routeId": 0, "routeStage": 0, "dungeonId": 0, "dungeonFloorNumber": 0,
     }, BASE)
     assert served["dungeonID"] == 701683
     assert [g["userName"] for g in served["ghostRuns"]] == ["Shrim"]
 
     backend.submit_run({
-        "playerId": "76561199000000111", "dungeonId": 701683,
+        "playerId": "76561198000000111", "dungeonId": 701683,
         "dungeonFloorNumber": 0, "gameMode": "DGM_ADVENTURE",
         "success": 0, "lifetime": 88.5, "runData": "alice-recording",
     })
 
-    _sign_in(backend, "76561199000000222", "Bob")
+    _sign_in(backend, "76561198000000222", "Bob")
     again = backend.get_dungeon({
-        "playerId": "76561199000000222", "gameMode": "DGM_ADVENTURE",
+        "playerId": "76561198000000222", "gameMode": "DGM_ADVENTURE",
         "routeId": 0, "routeStage": 0, "dungeonId": 701683,
         "dungeonFloorNumber": 0,
     }, BASE)
