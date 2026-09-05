@@ -381,6 +381,27 @@ class OfflineBackend:
     def maintenance_status(self, _req: dict[str, Any]) -> dict[str, Any]:
         return self._maintenance()
 
+    # Exactly what the live server answered a login with: 19 fields, the same
+    # 19 in all 23 captured logins, with no variation at all.
+    #
+    # Sending more is not harmless. The client takes this reply into a struct,
+    # and a struct that fails to convert leaves every field at its default --
+    # which is precisely what the client was found holding after an offline
+    # login: user id 0, no routes, no whips, no server target, while its own
+    # run counters ticked up normally. It was not ignoring the collection, it
+    # was never taking the reply at all.
+    LOGIN_FIELDS = (
+        "targetEndpoint", "currentUsername", "sharerID", "reputation",
+        "temporaryPowerIndex", "numSandbags", "health", "currency",
+        "upgrades", "lastRouteInfo", "activeClassicRoutes", "victoryRoutes",
+        "permanentPurchases", "dailyDungeonInfo", "dailyDungeonInfoYesterday",
+        "playerStats", "existingUser", "userID", "platformVerificationID",
+    )
+
+    def _as_login(self, out: dict[str, Any]) -> dict[str, Any]:
+        """Trim a login answer to the shape the real one had."""
+        return {k: out[k] for k in self.LOGIN_FIELDS if k in out}
+
     def verify_user(self, req: dict[str, Any]) -> dict[str, Any]:
         """`/VerifyUserID` -> WIBYUserResponse.
 
@@ -463,14 +484,10 @@ class OfflineBackend:
             if captured is None:
                 # Nothing of the captured account's own progress survives.
                 out["lastRouteInfo"] = self._route_info()
-            out["serverStatus"] = self._maintenance()
-            return out
+            return self._as_login(out)
 
         daily = self._daily_info(0)
-        return {
-            "serverStatus": self._maintenance(),
-            "serverVersion": SERVER_VERSION,
-            "serverProtocolVersion": SERVER_PROTOCOL_VERSION,
+        return self._as_login({
             "currentUsername": name,
             "userID": self.state["userID"],
             "userId": self.state["userID"],
@@ -489,7 +506,7 @@ class OfflineBackend:
             "dailyDungeonInfo": daily,
             "dailyDungeonInfoYesterday": self._daily_info(-1),
             "playerStatistics": self.state["statistics"],
-        }
+        })
 
     def refresh_verification(self, req: dict[str, Any]) -> dict[str, Any]:
         return self.verify_user(req)

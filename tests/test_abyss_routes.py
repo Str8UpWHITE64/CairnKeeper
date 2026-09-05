@@ -344,3 +344,27 @@ def test_a_substituted_temple_matches_the_difficulty_asked_for(tmp_path) -> None
     # Nothing at this difficulty. Serving one of the others is the bug; the
     # caller hands out a seed instead and the client builds its own.
     assert library.any_for_floor(0, game_mode=1, difficulty=20) is None
+
+
+def test_a_login_answers_with_the_fields_the_real_one_did(tmp_path) -> None:
+    """19 fields, the same 19 in all 23 captured logins, and no others.
+
+    Sending more is not harmless. The client reads this reply into a struct,
+    and a struct that fails to convert leaves every field at its default. That
+    is exactly what an offline client was found holding: user id 0, no routes,
+    no unlocked whips, no server target -- while its own run counters ticked
+    up normally. It had not ignored the collection, it had never taken the
+    reply at all.
+
+    Read out of the running game with UE4SS, before and after a completed run.
+    """
+    backend = OfflineBackend(tmp_path / "state")
+    answer = backend.verify_user({
+        "playerId": "76561198000000042", "currentUsername": "Tomb Raider",
+        "platform": "STEAM", "verificationToken": "t", "userId": 0,
+    })
+    assert set(answer) <= set(OfflineBackend.LOGIN_FIELDS)
+    for invented in ("serverStatus", "userId", "playerId", "verificationToken",
+                     "platform", "lockedRoutes", "playerStatistics",
+                     "serverVersion", "serverProtocolVersion"):
+        assert invented not in answer, f"the real server never sent {invented}"

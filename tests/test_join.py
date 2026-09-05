@@ -184,14 +184,25 @@ def test_the_host_never_learns_the_players_account(joined) -> None:
     assert "76561198000000888" not in everything, "their friends"
 
 
-def test_the_game_still_sees_its_own_account(joined) -> None:
+def test_the_handle_never_reaches_the_game(joined) -> None:
+    """The swap has to be invisible in both directions.
+
+    This used to check that the reply echoed the player's own platformId back.
+    It does not any more, because the real server never sent that field at all
+    -- a login answer is 19 fields, the same 19 in all 23 captured logins, and
+    playerId is not among them. Inventing one was part of why the client threw
+    the whole reply away.
+
+    What still matters is that nothing of ours goes out with it.
+    """
     answer = _post(joined.join_port, "/VerifyUserID", {
         "userId": 0, "playerId": "76561198000000042", "platform": "STEAM",
         "currentUsername": "Tomb Raider", "verificationToken": "t",
         "platformVerificationId": "", "clientDungeonVersion": 128,
         "clientProtocolVersion": 7,
     })
-    assert answer["playerId"] == "76561198000000042"
+    assert "pa-" not in json.dumps(answer), "the handle is ours, not the game's"
+    assert answer["currentUsername"] == "Tomb Raider", "still their account"
 
 
 def test_a_run_made_on_the_hosts_server_is_kept_there(joined) -> None:
