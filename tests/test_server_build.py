@@ -109,3 +109,46 @@ def test_capture_mode_never_swaps_the_identity(tmp_path: Path) -> None:
     finally:
         direct.server_close()
         proxy.server_close()
+
+
+def test_something_else_can_answer_the_game(tmp_path: Path) -> None:
+    """The seam other projects build on.
+
+    A randomizer, a difficulty mod, anything that wants the game answered
+    differently: it gets the state directory and the assembled archive and
+    hands back whatever will play the backend's part. A factory rather than a
+    finished object because the archive is put together inside build(),
+    bundles included, and a caller cannot reproduce that without copying it.
+    """
+    seen = {}
+
+    def make(state_dir, library):
+        seen["state_dir"] = state_dir
+        seen["archive"] = library
+        return server.OfflineBackend(state_dir / "state", archive=library)
+
+    direct, proxy, _ = server.build(
+        state_dir=tmp_path, direct_port=0, proxy_port=0,
+        mode=server.MODE_OFFLINE, make_backend=make,
+    )
+    try:
+        assert seen["state_dir"] == tmp_path
+        assert seen["archive"] is not None, "handed the archive, not left to find it"
+        assert direct.backend is proxy.backend, "both servers answer the same way"
+    finally:
+        direct.server_close()
+        proxy.server_close()
+
+
+def test_capture_refuses_a_substituted_backend(tmp_path: Path) -> None:
+    """Capture exists to record what the live service actually said.
+
+    Anything else answering in that mode could archive a reply the service
+    never gave, and every fixture, fidelity check and offline answer is built
+    on those recordings being true.
+    """
+    with pytest.raises(ValueError, match="capture mode"):
+        server.build(
+            state_dir=tmp_path, direct_port=0, proxy_port=0,
+            mode=server.MODE_CAPTURE, make_backend=lambda s, l: None,
+        )

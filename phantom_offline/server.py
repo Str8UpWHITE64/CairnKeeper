@@ -621,7 +621,20 @@ def build(
     mode: str = MODE_OFFLINE,
     host: str = "127.0.0.1",
     remote: str = "",
+    make_backend: Callable[[Path, Library], OfflineBackend] | None = None,
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, Recorder]:
+    """Bring up the two servers.
+
+    `make_backend` lets something built on top of this answer the game
+    differently -- it is handed the state directory and the assembled archive,
+    and returns whatever will play the part of the backend. A factory rather
+    than a finished object because the archive is put together here, bundles
+    and all, and a caller cannot reproduce that without copying it.
+
+    It is refused while capturing. That mode exists to record what the live
+    service actually said, and a substituted backend could bank something it
+    never said -- which would poison the archive everything else is built on.
+    """
     recorder = Recorder(state_dir / "capture")
     certs = CertStore(state_dir / "certs")
     # Shared content the player has chosen to accept. Only in offline mode:
@@ -630,7 +643,14 @@ def build(
 
     extra = _bundles.enabled_paths(state_dir) if mode == MODE_OFFLINE else []
     library = Library(state_dir / "assets", state_dir / "fixtures", bundles=extra)
-    backend = OfflineBackend(state_dir / "state", archive=library)
+    if make_backend is not None and mode == MODE_CAPTURE:
+        raise ValueError(
+            "capture mode always uses the stock backend: it forwards to the "
+            "live service, and a substituted one could archive something the "
+            "service never said"
+        )
+    backend = (make_backend(state_dir, library) if make_backend is not None
+               else OfflineBackend(state_dir / "state", archive=library))
     router = Router(backend, f"http://127.0.0.1:{direct_port}")
     print(f"  archive           : {library.summary()}")
 
