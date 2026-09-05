@@ -399,8 +399,19 @@ class OfflineBackend:
     )
 
     def _as_login(self, out: dict[str, Any]) -> dict[str, Any]:
-        """Trim a login answer to the shape the real one had."""
-        return {k: out[k] for k in self.LOGIN_FIELDS if k in out}
+        """Trim a login answer to the shape the real one had.
+
+        Field for field and type for type. The stats are the part that bites:
+        the client sends its own spelling and its own representation, and
+        handing those straight back puts a string where its struct wants a
+        number.
+        """
+        from .profile import as_server_stats
+
+        answer = {k: out[k] for k in self.LOGIN_FIELDS if k in out}
+        if "playerStats" in answer:
+            answer["playerStats"] = as_server_stats(answer["playerStats"])
+        return answer
 
     def verify_user(self, req: dict[str, Any]) -> dict[str, Any]:
         """`/VerifyUserID` -> WIBYUserResponse.
@@ -511,13 +522,34 @@ class OfflineBackend:
         return self.verify_user(req)
 
     def _route_info(self) -> dict[str, Any]:
+        """An empty RouteInfo, in the shape the real server sent one.
+
+        Captured verbatim from a live login with no route in flight. What was
+        here before had six fields against fourteen, `sandbag` where the real
+        one says `sandBag`, a string where it wanted 0, and -1 and 0 where it
+        wanted nulls.
+
+        That matters more than it looks. The client reads the login into a
+        struct, and a nested struct that will not convert takes the whole
+        reply down with it -- which is what an offline client was left with:
+        logged in and verified by its own account, holding user id 0 and no
+        routes at all.
+        """
         return {
-            "completedByID": "",
-            "completedByName": "",
+            "routeID": 0,
+            "gameMode": 0,
+            "shareCode": None,
+            "completedByID": 0,
+            "completedByName": None,
             "routeAttemptCount": 0,
-            "sandbag": False,
-            "wageredWhipID": -1,
-            "storedCurrency": 0,
+            "routeAttemptID": 0,
+            "dungeonVersion": 0,
+            "curseLevel": 0,
+            "wageredWhipID": None,
+            "purchased": 0,
+            "sandBag": 0,
+            "storedCurrency": None,
+            "dungeons": None,
         }
 
     # ----------------------------------------------------------- dungeon
@@ -1651,11 +1683,16 @@ class OfflineBackend:
         midnight = datetime(
             day.year, day.month, day.day, tzinfo=timezone.utc
         ) + timedelta(days=1)
+        # Five fields, as the real server sent them in every captured login.
+        # It never sent a dungeonSeed here and always sent a leaderboardType
+        # and a routeID; the seed belongs in the GetDungeon answer, which is
+        # where the client asks for it.
         return {
             "expiryTime": _ue_time(midnight),
-            "dungeonSeed": stable_seed("daily", day.isoformat()),
+            "leaderboardType": 0,
             "leaderboard": [],
             "clearanceRate": 0.0,
+            "routeID": 0,
         }
 
     def daily_info(self, _req: dict[str, Any]) -> dict[str, Any]:

@@ -109,3 +109,61 @@ def test_an_exported_report_is_plain_readable_json(tmp_path: Path) -> None:
     out = json.dumps(report.export(), indent=2)
     assert "areaID" in out
     assert json.loads(out)["divergences"][0]["count"] == 5
+
+
+def test_a_login_matches_the_real_one_structurally(tmp_path) -> None:
+    """Field for field and type for type, all the way down.
+
+    The client reads the login into a struct. A nested struct that will not
+    convert takes the whole reply with it, and the client is left holding
+    defaults -- which is what an offline one was found holding: logged in and
+    verified by its own account, user id 0, no routes, no whips.
+
+    Three of these were wrong at once. lastRouteInfo had six fields against
+    fourteen, with `sandbag` for `sandBag` and strings where numbers went.
+    playerStats echoed the client's own spelling back, so JustBeatArea went
+    out as "Ruins" where the server sends a number, and the floor timers kept
+    the client's casing one level down. dailyDungeonInfo carried a seed the
+    real one never sent and omitted two fields it always did.
+    """
+    from phantom_offline.backend import OfflineBackend
+
+    backend = OfflineBackend(tmp_path / "state")
+    answer = backend.verify_user({
+        "playerId": "76561198000000042", "currentUsername": "Tomb Raider",
+        "platform": "STEAM", "userId": 0,
+    })
+
+    route = answer["lastRouteInfo"]
+    assert set(route) == {
+        "routeID", "gameMode", "shareCode", "completedByID", "completedByName",
+        "routeAttemptCount", "routeAttemptID", "dungeonVersion", "curseLevel",
+        "wageredWhipID", "purchased", "sandBag", "storedCurrency", "dungeons",
+    }
+    assert route["completedByID"] == 0, "a number, not an empty string"
+    assert route["wageredWhipID"] is None, "null, not -1"
+    assert route["storedCurrency"] is None, "null, not 0"
+    assert "sandbag" not in route, "the real one spells it sandBag"
+
+    daily = answer["dailyDungeonInfo"]
+    assert set(daily) == {"expiryTime", "leaderboardType", "leaderboard",
+                          "clearanceRate", "routeID"}
+    assert "dungeonSeed" not in daily, "the seed belongs in the temple answer"
+
+
+def test_stats_go_back_in_the_types_the_server_used(tmp_path) -> None:
+    """The client's own spelling and representation are not the server's."""
+    from phantom_offline.profile import STAT_TYPES, as_server_stats
+
+    out = as_server_stats({
+        "JustBeatArea": "Ruins",            # the client says where; the server says how many
+        "JustClaimedRelic": "SoldierDart",
+        "FloorTimers": [{"areaIndex": 0, "floorIndex": 1, "floorTime": 12.5}],
+        "SomethingInvented": 1,
+    })
+    assert out["JustBeatArea"] == 0, "a number, whatever the client called it"
+    assert out["JustClaimedRelic"] == "SoldierDart", "and strings stay strings"
+    assert out["FloorTimers"] == [{"AreaIndex": 0, "FloorIndex": 1,
+                                   "FloorTime": 12.5}]
+    assert "SomethingInvented" not in out
+    assert set(out) == set(STAT_TYPES), "every field it sends, and only those"

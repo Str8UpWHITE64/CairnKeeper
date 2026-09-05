@@ -78,6 +78,121 @@ DEFAULTS: dict[str, Any] = {
     "relics": [],
 }
 
+
+# The type the real server used for every player stat, taken from 22 captured
+# logins with no field it was inconsistent about.
+#
+# The client and the server do not agree on these. The client sends
+# justBeatArea as a name -- "Ruins" -- and the server answers with a number.
+# Merging what the client sent and handing it straight back put a string
+# where the client's own struct wanted an int, and a nested struct that will
+# not convert takes the whole login down with it.
+STAT_TYPES: dict[str, type] = {
+    "BlessingsPurchased": int,
+    "BlessingsUsed": int,
+    "ChestsFound": int,
+    "ChestsSpawned": int,
+    "CoinDoorsOpened": int,
+    "CoinsCollected": int,
+    "CoinsSpent": int,
+    "CollectedCoinsThisFloor": dict,
+    "CollectedKeysThisFloor": dict,
+    "CurrentArea": int,
+    "CurrentDepth": int,
+    "CurrentFloor": int,
+    "CurrentPhantomsAll": int,
+    "DeepestAreaReached": int,
+    "DeepestDepthReached": int,
+    "FloorTimers": list,
+    "FurthestDropToRoll": float,
+    "HighestAdventureHeatCompletedPerWhip": dict,
+    "HighestJump": float,
+    "JustBeatArea": int,
+    "JustBlessedWhip": str,
+    "JustClaimedRelic": str,
+    "JustClaimedSandbag": bool,
+    "JustCollectedCoins": int,
+    "JustCollectedKeys": int,
+    "JustFacedGuardian": str,
+    "JustFreedSouls": bool,
+    "JustGotWhip": str,
+    "JustGotWhipSkin": str,
+    "JustHadBlessings": list,
+    "JustKilledBy": str,
+    "JustSeenDialogues": list,
+    "JustSpentCoins": int,
+    "JustUsedBlessings": list,
+    "KeysCollected": int,
+    "KeysTraded": int,
+    "LongestJump": float,
+    "LongestSlide": float,
+    "NumTimesDiedBy": dict,
+    "NumTimesEnteredTempleWithWhip": dict,
+    "NumTimesHadBlessing": dict,
+    "NumTimesPurchasedTemporaryPower": dict,
+    "NumTimesRunWithPlayer": dict,
+    "NumTimesUsedBlessing": dict,
+    "PhantomsFreed": int,
+    "ScaledFloorTimers": list,
+    "TemporaryPowersPurchased": int,
+    "TimesTalkedToUna": int,
+    "TimesTalkedToUnaThisRun": int,
+    "Timestamp": str,
+    "TopSpeed": float,
+    "TotalDistanceSlid": float,
+    "TotalDistanceTravelled": float,
+    "TotalNumberOfDropRolls": int,
+    "TotalNumberOfJumps": int,
+    "TotalSandbagsCollected": int,
+    "TotalTimesDashed": int,
+    "TotalTimesWhipUsed": int,
+}
+
+
+# The keys inside a floor timer, which the client spells one way and the server
+# another -- the same disagreement as the top level, one layer down, and missed
+# because normalising stopped at the outside.
+TIMER_KEYS = {"areaindex": "AreaIndex", "floorindex": "FloorIndex",
+              "floortime": "FloorTime"}
+
+
+def _as_timers(rows: Any) -> list:
+    """Floor timers with the keys spelled the way the server spelled them."""
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        out.append({TIMER_KEYS.get(str(k).lower(), k): v for k, v in row.items()})
+    return out
+
+
+def as_server_stats(stats: "dict[str, Any] | None") -> "dict[str, Any] | None":
+    """Player stats in the types the real server answered with.
+
+    Anything it never sent is dropped, and anything of the wrong type is
+    replaced by an empty value of the right one rather than guessed at. A
+    number that arrived as a name is not recoverable here, and inventing one
+    would be worse than saying nothing.
+    """
+    if not isinstance(stats, dict):
+        return stats
+    empty = {int: 0, float: 0.0, str: "", bool: False, list: [], dict: {}}
+    out: dict[str, Any] = {}
+    for name, want in STAT_TYPES.items():
+        value = stats.get(name)
+        if want is float and isinstance(value, int) and not isinstance(value, bool):
+            out[name] = float(value)
+        elif isinstance(value, want) and not (want is int and isinstance(value, bool)):
+            out[name] = value
+        else:
+            out[name] = empty[want]
+    for timers in ("FloorTimers", "ScaledFloorTimers"):
+        out[timers] = _as_timers(out.get(timers))
+    return out
+
+
 PURCHASE_OK = 0
 
 # Challenge reward tiers, read off the in-game challenge screen. A challenge
