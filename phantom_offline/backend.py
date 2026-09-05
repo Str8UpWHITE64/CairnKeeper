@@ -228,6 +228,10 @@ def _seed_owner(state_dir: Path) -> str | None:
     return str(player)
 
 
+# EWIBYDailyLeaderboardType, in the order the binary declares it. The client
+# sends the name; the server answers with the value.
+DAILY_LEADERBOARD_TYPES = {"DLT_SCORE": 0, "DLT_TIME": 1}
+
 DAILY_STUB: dict[str, Any] = {
     "expiryTime": "0001-01-01T00:00:00",
     "leaderboardType": 0,
@@ -1214,9 +1218,8 @@ class OfflineBackend:
         banked = profile.apply_run(req)
 
         with self._lock:
-            attempt_id = len(self.state["runs"]) + 1
             self.state["runs"].append({
-                "attemptID": attempt_id,
+                "runNumber": len(self.state["runs"]) + 1,
                 "at": _ue_time(_utc()),
                 "dungeonID": 0,
                 "dungeonFloorNumber": _first(req, "dungeonFloorNumber") or 0,
@@ -1242,8 +1245,10 @@ class OfflineBackend:
             "lastRunRouteInfo": None,
             "activeClassicRoutes": snapshot.get("activeClassicRoutes") or [],
             "maintenanceInfo": self._maintenance(),
-            "attemptID": attempt_id,
-            "dailySubmissionResponse": self._daily_block(),
+            # The route attempt, as on /SubmitRun. The one captured tutorial
+            # receipt says 0.
+            "attemptID": int(_first(req, "routeAttemptId", "routeAttemptID") or 0),
+            "dailySubmissionResponse": self._daily_receipt(req),
         }
 
     def submit_run(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -1260,9 +1265,12 @@ class OfflineBackend:
         run_data = req.get("runData")
 
         with self._lock:
-            attempt_id = len(self.state["runs"]) + 1
+            # Our own count of runs stored here. It names the recording on
+            # disk and nothing else -- see the receipt below for why it must
+            # never be sent as `attemptID`.
+            run_number = len(self.state["runs"]) + 1
             record = {
-                "attemptID": attempt_id,
+                "runNumber": run_number,
                 "at": _ue_time(_utc()),
                 "dungeonID": dungeon_id,
                 "dungeonFloorNumber": floor,
@@ -1288,9 +1296,10 @@ class OfflineBackend:
         # The live server appends when the whole route ends; we append at each
         # completion instead. The end state is identical, and recording sooner
         # means a relic is not lost if the session stops mid-route.
+        route_info = self._route_info_for(req)
         if req.get("success") == RUN_TEMPLE_COMPLETED:
-            profile.record_victory(self._as_history(self._route_info_for(req)))
-        stored = self._store_run(req, dungeon_id, floor, attempt_id, run_data)
+            profile.record_victory(self._as_history(route_info))
+        stored = self._store_run(req, dungeon_id, floor, run_number, run_data)
 
         # Shape mirrors a captured 200 response exactly: no serverStatus here
         # (only /GetDungeon carries it), `success` and `isSandbag` are bools,
@@ -1312,10 +1321,18 @@ class OfflineBackend:
             "temporaryPowerIndex": -1,
             "health": None,
             "currency": banked,
-            "lastRunRouteInfo": self._route_info_for(req) if banked else None,
-            "attemptID": attempt_id,
+            "lastRunRouteInfo": route_info if banked else None,
+            # The attempt the client is on, not how many runs we have stored.
+            # In every captured receipt this equals the route's own
+            # routeAttemptID: 0 in 102 of them, and 1 in the one where the
+            # route block said 1 too. We were sending a counter here (68 by the
+            # time it was noticed) against a route block saying 0, and a
+            # receipt that names an attempt the client never made is not the
+            # receipt it is waiting for. The relic and whip then arrived at the
+            # next login, out of victoryRoutes, instead of at the hub.
+            "attemptID": route_info["routeAttemptID"],
             "activeClassicRoutes": [],
-            "dailySubmissionResponse": self._daily_block(),
+            "dailySubmissionResponse": self._daily_receipt(req),
             "maintenanceInfo": self._maintenance(),
         }
 
@@ -1582,7 +1599,7 @@ class OfflineBackend:
             self._save()
 
     def _daily_block(self) -> dict[str, Any]:
-        """`dailyDungeonInfo` / `dailySubmissionResponse`.
+        """The daily block a run receipt carries.
 
         Captured verbatim when available -- the live server returns the current
         daily state on every run submission, not just daily ones.
@@ -1593,6 +1610,22 @@ class OfflineBackend:
             if isinstance(block, dict):
                 return dict(block)
         return dict(DAILY_STUB)
+
+    def _daily_receipt(self, req: dict[str, Any]) -> dict[str, Any]:
+        """`dailySubmissionResponse` on a run receipt.
+
+        The daily block as on a login, except that `leaderboardType` names the
+        board the submission was scored on: the request's own `leaderboardType`
+        as an enum value, 0 (DLT_SCORE) in all 104 captured receipts. The login
+        block captured from the live service carries 1 there, and copying it
+        into receipts was the one other place ours disagreed with every live
+        receipt.
+        """
+        block = self._daily_block()
+        block["leaderboardType"] = DAILY_LEADERBOARD_TYPES.get(
+            req.get("leaderboardType"), 0
+        )
+        return block
 
     def _dungeon_record(self, req: dict[str, Any], relic: Any) -> dict[str, Any]:
         """One dungeon inside a route entry, matching a captured completion.
@@ -1657,7 +1690,7 @@ class OfflineBackend:
             "completedByID": _first(req, "userId", "userID") or self._caller_id(req) or 0,
             "completedByName": None,
             "routeAttemptCount": 0,
-            "routeAttemptID": _first(req, "routeAttemptId", "routeAttemptID") or 0,
+            "routeAttemptID": int(_first(req, "routeAttemptId", "routeAttemptID") or 0),
             "dungeonVersion": SERVER_VERSION,
             "curseLevel": int(
                 req.get("curseLevel")
@@ -1704,7 +1737,7 @@ class OfflineBackend:
         req: dict[str, Any],
         dungeon_id: int,
         floor: int,
-        attempt_id: int,
+        run_number: int,
         run_data: Any,
     ) -> bool:
         """Save the phantom recording next to the archived ones."""
@@ -1714,7 +1747,7 @@ class OfflineBackend:
             return False
 
         # Name it so the existing archive indexer recognizes it as a phantom.
-        name = f"local__dungeon-{dungeon_id}-floor-{floor}-runinfo-{attempt_id:06d}"
+        name = f"local__dungeon-{dungeon_id}-floor-{floor}-runinfo-{run_number:06d}"
         try:
             (self.archive.dir / name).write_text(run_data, encoding="utf-8")
         except OSError:
@@ -1740,7 +1773,7 @@ class OfflineBackend:
                 "success": req.get("success") or 0,
                 "lifetime": req.get("lifetime") or 0.0,
                 "endLocation": req.get("endLocation") or "",
-                "runID": attempt_id,
+                "runID": run_number,
                 "reputation": runner.get("reputation") or 0,
                 "platform": 1,
                 # No platformUserID. It is the runner's SteamID64, nothing

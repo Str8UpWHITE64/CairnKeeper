@@ -270,6 +270,15 @@ Response:
  "maintenanceInfo": { ...as elsewhere... }}
 ```
 
+`attemptID` on the receipt is the route attempt, the same value as
+`lastRunRouteInfo.routeAttemptID`: 0 in 102 of 103 captured receipts and 1 in
+the one whose route block also said 1. It is not a count of submissions. A
+receipt whose `attemptID` does not match the attempt the client is on is not
+treated as the receipt for the run it just submitted, and the relic and whip a
+completed route earns then arrive at the next login (from `victoryRoutes`)
+instead of at the hub. `dailySubmissionResponse.leaderboardType` is the
+request's `leaderboardType` as an enum value (`DLT_SCORE` 0, `DLT_TIME` 1).
+
 Note the request uses `dungeonId`/`routeId`/`playerUniqueId` while the response
 uses `dungeonID`/`routeID`/`userID` — the same casing split seen on
 `/GetDungeon`. `playerStats` is a flat object of ~60 lifetime counters, sent
