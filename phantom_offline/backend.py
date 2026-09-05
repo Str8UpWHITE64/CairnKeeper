@@ -707,6 +707,7 @@ class OfflineBackend:
                     floor,
                     pick=pick + offset,
                     game_mode=GAME_MODES.get(game_mode),
+                    difficulty=difficulty,
                     exclude=beaten,
                 )
                 if candidate is None or not self._temple_blocked(candidate):

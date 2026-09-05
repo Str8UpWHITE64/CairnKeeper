@@ -499,6 +499,7 @@ class Library:
         *,
         pick: int = 0,
         game_mode: int | None = None,
+        difficulty: int | None = None,
         exclude: "set[int] | frozenset[int]" = frozenset(),
     ) -> Temple | None:
         """An archived temple that has this floor.
@@ -530,6 +531,29 @@ class Library:
             candidates = [t for t in candidates if t.game_mode == game_mode]
             if not candidates:
                 return None
+        if difficulty is not None:
+            # Never substitute across difficulties either, for the same reason
+            # and on stronger evidence: across 2,428 captured exchanges the
+            # real server answered the difficulty it was asked for every single
+            # time, with no exceptions. Fresh runs map it straight onto the
+            # area -- 0 to area 1, 20 to 2, 40 to 3, 60 to 4.
+            #
+            # Substituting across it hands a player starting a fresh run an
+            # area 4 temple built for difficulty 60. That is roughly a quarter
+            # of what this archive can offer, and the one time it happened the
+            # phantoms walked through the walls and the game crashed two floors
+            # later.
+            # Only temples that state a different difficulty are refused. One
+            # that states none is left alone: this is meant to stop a known
+            # mismatch being served, not to start withholding temples nobody
+            # has ever had trouble with.
+            matching = [
+                t for t in candidates
+                if (t.response or {}).get("difficultyRating") in (None, difficulty)
+            ]
+            if not matching:
+                return None
+            candidates = matching
         if not candidates:
             # Nothing complete has this floor; fall back to anything usable.
             candidates = [

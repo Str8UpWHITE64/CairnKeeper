@@ -302,3 +302,45 @@ def test_the_floor_count_must_match_the_difficulty(tmp_path: Path) -> None:
     assert all(not f["layoutDownloadURL"] for f in served), \
         "a 2-floor temple must not fill a 3-floor slot"
     assert [f["areaID"] for f in served] == [1, 2, 3, 4]
+
+
+def test_a_substituted_temple_matches_the_difficulty_asked_for(tmp_path) -> None:
+    """The real server never answered a difficulty it was not asked for.
+
+    Measured across 2,428 captured exchanges, with no exceptions: asked 0 got
+    0, asked 60 got 60. On a fresh run it maps straight onto the area -- 0 to
+    area 1, 20 to 2, 40 to 3, 60 to 4.
+
+    Substituting across it handed somebody starting a fresh run an area 4
+    temple built for difficulty 60. The phantoms walked through the walls and
+    the game crashed two floors later, which is the same failure as answering
+    an Adventure request with an Abyss temple, one notch less obvious.
+    """
+    import base64
+    import json
+
+    (tmp_path / "assets").mkdir(parents=True)
+    library = Library(tmp_path / "assets", tmp_path / "fixtures")
+
+    for dungeon, difficulty, area in ((701001, 0, 1), (701142, 60, 4)):
+        blob = f"pool__dungeon-{dungeon}-floor-0-layout-x"
+        (tmp_path / "assets" / blob).write_text(
+            base64.b64encode(json.dumps(
+                {"numWings": 2, "roomInfos": [{"roomIndex": 0}]}).encode()
+            ).decode(), encoding="utf-8")
+        library.record_local_temple(dungeon, 0, {
+            "dungeonID": dungeon, "dungeonFloorNumber": 0, "gameMode": 1,
+            "areaID": area, "dungeonSeed": 5, "dungeonLayoutType": 3,
+            "dungeonFloorType": 1, "dungeonFloorTotalCount": 1,
+            "difficultyRating": difficulty,
+        }, blob, origin="cdn")
+
+    easy = library.any_for_floor(0, game_mode=1, difficulty=0)
+    assert easy is not None and easy.dungeon_id == 701001
+
+    hard = library.any_for_floor(0, game_mode=1, difficulty=60)
+    assert hard is not None and hard.dungeon_id == 701142
+
+    # Nothing at this difficulty. Serving one of the others is the bug; the
+    # caller hands out a seed instead and the client builds its own.
+    assert library.any_for_floor(0, game_mode=1, difficulty=20) is None
