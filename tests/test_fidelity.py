@@ -201,3 +201,44 @@ def test_existing_user_says_whether_this_server_knows_them(tmp_path) -> None:
                                  "currentUsername": "Tomb Raider"})
     assert again["existingUser"] is True, "this server has met them since"
     assert again["victoryRoutes"], "and their route is theirs to get back"
+
+
+def test_times_are_written_the_way_the_server_wrote_them(tmp_path) -> None:
+    """`2026-08-26T00:00:00Z`, not `20260826T000000Z`.
+
+    The compact form came from a `%Y%m%dT%H%M%S%sZ` pattern found in the
+    binary. That is a pattern the client parses with, not one the server ever
+    answered in: every timestamp in every captured reply carries the dashes
+    and the colons.
+
+    A datetime the client cannot parse fails the struct it is being read into,
+    and a failed struct takes the whole login with it. That is the entire
+    reason an offline player was logged in, verified, and holding no user id,
+    no routes, no whips and no collection -- and it was the expiry stamp on a
+    daily dungeon nobody was playing.
+    """
+    import re
+
+    from phantom_offline.backend import OfflineBackend
+
+    backend = OfflineBackend(tmp_path / "state")
+    answer = backend.verify_user({"playerId": "76561198000000042", "userId": 0,
+                                  "currentUsername": "Tomb Raider"})
+    shape = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+
+    stamps: list[tuple[str, str]] = []
+
+    def gather(value, path=""):
+        if isinstance(value, str) and "T" in value and value[:2] == "20":
+            stamps.append((path, value))
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                gather(v, f"{path}.{k}" if path else k)
+        elif isinstance(value, list):
+            for i, v in enumerate(value):
+                gather(v, f"{path}[{i}]")
+
+    gather(answer)
+    assert stamps, "the login carries at least one timestamp"
+    for where, value in stamps:
+        assert shape.match(value), f"{where} is {value!r}, which will not parse"

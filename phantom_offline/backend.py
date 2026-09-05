@@ -146,8 +146,22 @@ def _utc() -> datetime:
 
 
 def _ue_time(when: datetime) -> str:
-    """Format matching the binary's `%Y%m%dT%H%M%S%sZ` timestamp pattern."""
-    return when.strftime("%Y%m%dT%H%M%SZ")
+    """A time in the shape the real server wrote one.
+
+    `2026-08-26T00:00:00Z`, not `20260826T000000Z`. The compact form came from
+    a `%Y%m%dT%H%M%S%sZ` pattern found in the binary, which is a pattern the
+    client parses with and not one the server ever answered in: every
+    timestamp in every captured reply carries the dashes and the colons.
+
+    This was the whole of it. The client reads a login into a struct, a
+    datetime it cannot parse fails that struct, and a struct that fails takes
+    the entire reply with it -- so an offline player was logged in and
+    verified and holding nothing: no user id, no routes, no whips, no
+    collection, for as long as this project has existed. Two days of looking
+    at the fields either side of it, and it was the expiry stamp on a daily
+    dungeon nobody was playing.
+    """
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # How many temples per player this server remembers handing out. Enough for a

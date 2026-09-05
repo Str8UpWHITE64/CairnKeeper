@@ -193,6 +193,12 @@ def as_server_stats(stats: "dict[str, Any] | None") -> "dict[str, Any] | None":
     return out
 
 
+# Where a locally allocated user id may sit. Above every id the live service
+# was seen to issue -- the largest of 3,380 was 404,886 -- so one of ours can
+# never collide with an archived phantom's, and below a million, because the
+# client will not accept an id outside the range the real server used.
+MADE_UP_IDS = (500_000, 999_999)
+
 PURCHASE_OK = 0
 
 # Challenge reward tiers, read off the in-game challenge screen. A challenge
@@ -393,17 +399,33 @@ class Profile:
 
         A seeded profile already has the real one. Everyone else needs one that
         is theirs alone and does not move: two players sharing an id are two
-        phantoms sharing an actor name, which crashes the client on spawn. Kept
-        above the range the live service reached so a made-up id is
-        recognisable as one.
+        phantoms sharing an actor name, which crashes the client on spawn.
+
+        These used to be allocated above 800,000,000, so that a made-up id was
+        recognisable as one. That was the whole bug behind an offline player
+        having no collection. Every one of the 3,380 ids the live service was
+        ever seen to send is under a million -- 164 at the smallest, 404,886 at
+        the largest -- and the client will not take one outside that. It
+        reported itself logged in and verified and then kept nothing: no user
+        id, no routes, no whips.
+
+        Found by handing the client a captured login with our fields
+        substituted in one at a time until it refused. It refused on this one.
+
+        The band starts above every id the live service was seen to use, so a
+        local id cannot collide with an archived phantom's, and stays inside
+        the range the client accepts.
         """
         with self._lock:
             existing = self.data.get("userID")
-            if isinstance(existing, int) and existing > 0:
+            if isinstance(existing, int) and MADE_UP_IDS[0] <= existing <= MADE_UP_IDS[1]:
                 return existing
+            if isinstance(existing, int) and 0 < existing < MADE_UP_IDS[0]:
+                return existing          # seeded from a captured login: real
             source = str(platform_id or self.path.stem)
             digest = hashlib.sha256(source.encode("utf-8")).digest()
-            allocated = 800_000_000 + int.from_bytes(digest[:5], "big") % 90_000_000
+            span = MADE_UP_IDS[1] - MADE_UP_IDS[0]
+            allocated = MADE_UP_IDS[0] + int.from_bytes(digest[:5], "big") % span
             self.data["userID"] = allocated
             self._write(self.data)
             return allocated
