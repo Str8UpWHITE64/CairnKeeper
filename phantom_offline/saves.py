@@ -29,6 +29,10 @@ STORE = "saves"
 BOOKMARK = "state.json"
 # What was live when a session started, kept until it is back where it was.
 IN_FLIGHT = "_before_session.sav"
+# Copies of a stored save taken before something replaced it with a file that
+# was not the one the last session left behind. Never cleaned up automatically:
+# this directory existing at all means something was not what it looked like.
+SUPERSEDED = "saves-unclaimed"
 
 
 def game_save_dir() -> Path | None:
@@ -106,18 +110,17 @@ class SaveSlots:
         if current == handle and live.exists() and not self.has(handle):
             # The save on disk is this profile's, and nothing has been stored
             # for them yet. Keep it exactly where it is; it is their progress.
-            self._begin(live, current)
+            warning = self._begin(live, current)
             book = self._read_bookmark()
             book["owner"] = handle
             self._write_bookmark(book)
-            return ""
+            return warning
         if current == handle and not self._read_bookmark().get("inFlight"):
             # Already theirs. Still keep a copy of what is live, so the
             # session can be undone whatever happens during it.
-            self._begin(live, current)
-            return ""
+            return self._begin(live, current)
 
-        self._begin(live, current)
+        warning = self._begin(live, current)
 
         target = self.stored(handle)
         if target.is_file():
@@ -141,7 +144,7 @@ class SaveSlots:
         book = self._read_bookmark()
         book["owner"] = handle
         self._write_bookmark(book)
-        return note
+        return "; ".join(x for x in (warning, note) if x)
 
     @staticmethod
     def _is_copy_of(copy: Path, original: Path) -> bool:
@@ -156,17 +159,57 @@ class SaveSlots:
         except OSError:
             return False
 
-    def _begin(self, live: Path, current: str) -> None:
+    def _keep_superseded(self, handle: str, live: Path) -> str:
+        """Copy a stored save aside before something different lands on it.
+
+        Banking the live file under whoever last held it is right when they
+        are the one who wrote it. Nothing here can tell that apart from a
+        second Steam account writing the same file -- the save records no
+        owner, and both cases look identical: the live file is not the one the
+        last session left.
+
+        So this does not try to decide. It keeps what is about to be replaced,
+        verified, and says so. A wrong guess then costs a copy instead of a
+        collection.
+
+        Learned the hard way: a listen session on a second Steam account wrote
+        the shared save, and the next offline session banked those 21 KB over a
+        275 KB profile. The bytes survived only because they had been copied
+        somewhere else by luck.
+        """
+        stored = self.stored(handle)
+        if not stored.is_file() or not live.is_file():
+            return ""
+        if self._is_copy_of(stored, live):
+            return ""
+
+        room = self.dir.parent / SUPERSEDED
+        room.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        aside = room / f"{handle}-{stamp}.sav"
+        shutil.copy2(stored, aside)
+        if not self._is_copy_of(aside, stored):
+            raise RuntimeError(
+                "refusing to replace a stored save: the copy kept aside did "
+                "not read back"
+            )
+        return (f"the save on disk is not the one this profile was left with; "
+                f"kept the old {stored.stat().st_size:,}-byte copy at "
+                f"{aside.name}")
+
+    def _begin(self, live: Path, current: str) -> str:
         """Record what was live before the session, once."""
         book = self._read_bookmark()
         if book.get("inFlight"):
-            return
+            return ""
         keep = self.dir / IN_FLIGHT
+        warning = ""
         if live.exists():
             shutil.copy2(live, keep)
             # And bank it under whoever it belonged to, so switching away
             # never loses the progress made under the previous profile.
             if current:
+                warning = self._keep_superseded(current, live)
                 shutil.copy2(live, self.stored(current))
         elif keep.exists():
             keep.unlink()
@@ -175,6 +218,7 @@ class SaveSlots:
         book["startedAt"] = datetime.now(timezone.utc).replace(
             microsecond=0).isoformat()
         self._write_bookmark(book)
+        return warning
 
     def finish(self) -> str:
         """Bank what the session produced, then put the file back as found."""

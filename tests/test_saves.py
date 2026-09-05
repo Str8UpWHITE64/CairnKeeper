@@ -218,3 +218,61 @@ def test_the_save_on_disk_is_recognised_as_the_first_profiles(
     assert (game / SAVE_NAME).read_text("utf-8") == "everything earned so far"
     slots.finish()
     assert (game / SAVE_NAME).read_text("utf-8") == "everything earned so far"
+
+
+def test_a_stored_save_is_never_replaced_without_a_copy(tmp_path: Path) -> None:
+    """The save on disk is not always the one the last session left.
+
+    A second Steam account on the same PC writes the same file -- the path is
+    per Windows user, not per account -- and so does the player launching the
+    game normally in between. Nothing here can tell those apart: the save
+    records no owner, and both look identical from the outside.
+
+    So this does not guess. It keeps what is about to be replaced. Found when
+    a listen session on a second account wrote the shared save and the next
+    offline session banked those 21 KB over a 275 KB profile; the bytes
+    survived by luck rather than by design.
+    """
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    live = live_dir / SAVE_NAME
+    slots = SaveSlots(tmp_path / "state", save_dir=live_dir)
+
+    # A profile with real progress banked: play it, then end the session,
+    # which is the only way a stored save comes to exist.
+    slots.install("pa-main")
+    live.write_bytes(b"main progress, hard won" * 500)
+    slots.finish()
+    banked = slots.stored("pa-main")
+    before = banked.read_bytes()
+    assert len(before) > 10000
+
+    # Something else writes the shared file: a different account, a normal
+    # launch, anything. Then a session starts on another profile, while the
+    # save on disk is still believed to be this one's.
+    live.write_bytes(b"somebody else's much smaller save")
+    note = slots.install("pa-other", presumed_owner="pa-main")
+
+    kept = sorted((tmp_path / "state" / "saves-unclaimed").glob("pa-main-*.sav"))
+    assert kept, "the save being replaced was kept"
+    assert kept[0].read_bytes() == before, "and kept byte for byte"
+    assert "not the one this profile was left with" in note, (
+        "and the player is told, because a quiet one is how this went unnoticed")
+
+
+def test_nothing_is_kept_aside_when_the_save_is_the_expected_one(tmp_path: Path) -> None:
+    """The ordinary case must not litter. A copy per session would bury the
+    one that matters."""
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    live = live_dir / SAVE_NAME
+    slots = SaveSlots(tmp_path / "state", save_dir=live_dir)
+
+    slots.install("pa-main")
+    live.write_bytes(b"progress")
+    slots.finish()
+    live.write_bytes(b"progress")
+    slots.install("pa-other", presumed_owner="pa-main")
+
+    room = tmp_path / "state" / "saves-unclaimed"
+    assert not room.exists() or not list(room.glob("*.sav"))
