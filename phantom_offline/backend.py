@@ -1180,7 +1180,7 @@ class OfflineBackend:
         # completion instead. The end state is identical, and recording sooner
         # means a relic is not lost if the session stops mid-route.
         if req.get("success") == RUN_TEMPLE_COMPLETED:
-            profile.record_victory(self._route_info_for(req))
+            profile.record_victory(self._as_history(self._route_info_for(req)))
         stored = self._store_run(req, dungeon_id, floor, attempt_id, run_data)
 
         # Shape mirrors a captured 200 response exactly: no serverStatus here
@@ -1493,10 +1493,16 @@ class OfflineBackend:
         Preserving this record is therefore what preserves an unlocked whip.
         """
         dungeon_id = int(_first(req, "dungeonId", "dungeonID") or 0)
-        user_id = _first(req, "userId", "userID") or 0
+        # The in-game id, not whatever the request happened to carry. A run
+        # banked under 0 names nobody, and the collector of a relic is the
+        # player who collected it.
+        user_id = _first(req, "userId", "userID") or self._caller_id(req) or 0
         floors = self.state.get("dungeonFloors", {}).get(str(dungeon_id))
         return {
             "dungeonID": dungeon_id,
+            # 0 here, and that is not an oversight: a captured lastRunRouteInfo
+            # returned straight after a live run carries 0 too. The id is
+            # filled in when the route is banked, not when it is handed back.
             "routeID": 0,
             "routeStage": int(req.get("routeStage") or 0),
             "numGhosts": 0,
@@ -1508,6 +1514,8 @@ class OfflineBackend:
             "relicCollectionFlags": 0,
             "relicCollectorUserIDs": [user_id] if relic else None,
             "relicCollectorNames": [None] if relic else None,
+            # -1 while the route is being handed back, 2 once it is history.
+            # A live capture shows both, which is how they came to be confused.
             "attemptedStatus": -1,
             "areaID": int(
                 self.state.get("dungeonAreas", {}).get(str(dungeon_id))
@@ -1520,10 +1528,12 @@ class OfflineBackend:
         """The RouteInfo the real server returns once a route ends."""
         relic = req.get("collectedRelicId")
         return {
-            "routeID": _first(req, "routeId", "routeID") or 0,
+            "routeID": int(_first(req, "routeId", "routeID") or 0),
             "gameMode": GAME_MODES.get(req.get("gameMode"), 0),
             "shareCode": None,
-            "completedByID": _first(req, "userId", "userID") or 0,
+            # The player who finished it, named the same way every other
+            # response names them. All 55 carried a real id.
+            "completedByID": _first(req, "userId", "userID") or self._caller_id(req) or 0,
             "completedByName": None,
             "routeAttemptCount": 0,
             "routeAttemptID": _first(req, "routeAttemptId", "routeAttemptID") or 0,
@@ -1540,9 +1550,32 @@ class OfflineBackend:
             ),
             "purchased": 0,
             "sandBag": int(req.get("isSandbag") or 0),
+            # What the run was holding. Cleared when the route is banked.
             "storedCurrency": req.get("currency"),
             "dungeons": [self._dungeon_record(req, relic)],
         }
+
+    @staticmethod
+    def _as_history(route: dict[str, Any]) -> dict[str, Any]:
+        """The same route, in the shape the server keeps rather than returns.
+
+        A live capture shows the two are not the same. Handed back in
+        lastRunRouteInfo a route carries dungeons[].routeID 0, attemptedStatus
+        -1 and whatever currency the run was holding. Read back out of
+        victoryRoutes at the next login, the same route names its own id,
+        says 2, and has no stored currency -- measured across 55 of them with
+        no exceptions.
+
+        Banking the returned shape leaves a dungeon pointing at no route at
+        all, which is what the client walked in circles on.
+        """
+        banked = dict(route)
+        banked["storedCurrency"] = None
+        banked["dungeons"] = [
+            dict(d, routeID=int(route.get("routeID") or 0), attemptedStatus=2)
+            for d in (route.get("dungeons") or [])
+        ]
+        return banked
 
     def _store_run(
         self,

@@ -152,3 +152,85 @@ def test_completion_then_death_keeps_one_victory(tmp_path: Path) -> None:
     profile = backend.profiles.for_player(PLAYER)
     assert len(profile.snapshot()["victoryRoutes"]) == 1
     assert profile.relics_earned() == ["Panda"]
+
+
+def test_a_banked_route_looks_like_one_the_real_server_banked(tmp_path: Path) -> None:
+    """Four things were wrong at once, and the client died on the fourth.
+
+    Measured across 55 real victory routes with no exceptions: a dungeon
+    carries the id of the route it belongs to, attemptedStatus is 2, the route
+    names who finished it, and storedCurrency is null once the route has ended.
+
+    Ours banked routeID 0, attemptedStatus -1, completedByID 0 and the
+    currency the run was still holding. On the next launch the game played the
+    relic cutscene and then died in a stack overflow two frames deep -- a
+    dungeon pointing at no route at all being the likeliest thing to walk in
+    a circle.
+    """
+    backend = _backend(tmp_path)
+    backend.submit_run(
+        {
+            "playerId": PLAYER,
+            "routeId": 4242,
+            "dungeonId": 701683,
+            "dungeonFloorNumber": 2,
+            "success": 2,
+            "collectedRelicId": "SoldierDart",
+            "currency": {"essence": 9, "dungeonKeys": [5, 0, 0, 0]},
+        }
+    )
+    route = backend.profiles.for_player(PLAYER).snapshot()["victoryRoutes"][0]
+
+    assert route["storedCurrency"] is None, "the route has ended"
+    assert route["completedByID"], "somebody finished it"
+    for dungeon in route["dungeons"]:
+        assert dungeon["routeID"] == route["routeID"], (
+            "a dungeon naming no route is what the client walked in circles on")
+        assert dungeon["attemptedStatus"] == 2, "it was completed"
+        if dungeon.get("relicIDs"):
+            assert dungeon["relicCollectorUserIDs"] not in ([0], [None], None), (
+                "somebody collected the relic")
+
+
+def test_the_route_handed_back_is_not_the_route_kept(tmp_path: Path) -> None:
+    """They are different shapes, and a live capture is what settled it.
+
+    Handed back in lastRunRouteInfo, straight after the run: dungeons[].routeID
+    is 0, attemptedStatus is -1, storedCurrency holds what the run was
+    carrying. Read back out of victoryRoutes at the next login the same route
+    names its own id, says 2, and stores no currency.
+
+    Banking the returned shape leaves a dungeon pointing at no route at all,
+    and the client played the relic cutscene on the next launch and then died
+    in a stack overflow. Normalising both the same way is how that happened:
+    one measurement, taken from victoryRoutes, applied to a function that also
+    feeds the reply.
+    """
+    backend = _backend(tmp_path)
+    answer = backend.submit_run(
+        {
+            "playerId": PLAYER,
+            "routeId": 205655,
+            "dungeonId": 701296,
+            "dungeonFloorNumber": 2,
+            "success": 2,
+            "collectedRelicId": "MarbleRelic",
+            "currency": {"essence": 0, "dungeonKeys": [6, 0, 0, 0]},
+        }
+    )
+
+    handed_back = answer["lastRunRouteInfo"]
+    assert handed_back["storedCurrency"] == {"essence": 0,
+                                             "dungeonKeys": [6, 0, 0, 0]}
+    assert handed_back["dungeons"][0]["routeID"] == 0
+    assert handed_back["dungeons"][0]["attemptedStatus"] == -1
+
+    kept = backend.profiles.for_player(PLAYER).snapshot()["victoryRoutes"][0]
+    assert kept["storedCurrency"] is None
+    assert kept["dungeons"][0]["routeID"] == kept["routeID"] == 205655
+    assert kept["dungeons"][0]["attemptedStatus"] == 2
+
+    # True of both, and the one thing the old code got wrong in both places.
+    for shape in (handed_back, kept):
+        assert shape["completedByID"], "somebody finished it"
+        assert shape["dungeons"][0]["relicCollectorUserIDs"] not in ([0], None)
